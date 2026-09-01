@@ -1,0 +1,111 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  --admin-bg: #090a0f;
+  --admin-surface: #11131b;
+  --admin-surface-strong: #191d29;
+  --admin-surface-hover: #252b3b;
+  --admin-border: rgba(255, 255, 255, 0.1);
+  --admin-border-strong: rgba(245, 200, 75, 0.5);
+  --admin-text: #f8fafc;
+  --admin-text-muted: #94a3b8;
+  --admin-accent: #f5c84b;
+  --admin-accent-text: #090a0f;
+  --admin-danger: #ff6b6b;
+  --admin-success: #6ee7b7;
+  --admin-radius: 8px;
+  --admin-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+  --admin-sidebar-width: 18rem;
+  background: var(--admin-bg);
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: var(--admin-bg);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+@layer components {
+  /* Admin layout classes keep shell structure and theme colors centralized for future pages. */
+  .admin-app {
+    @apply h-screen w-full overflow-hidden text-slate-100;
+    background: var(--admin-bg);
+    color: var(--admin-text);
+  }
+
+  .admin-content {
+    @apply flex h-screen w-full flex-col overflow-hidden px-4 py-4 sm:px-5 sm:py-5;
+  }
+
+  .admin-panel {
+    @apply border bg-ink-900 shadow-panel;
+    border-color: var(--admin-border);
+    border-radius: var(--admin-radius);
+  }
+
+  .admin-icon-tile {
+    @apply grid place-items-center bg-gold text-ink-950;
+    border-radius: calc(var(--admin-radius) - 2px);
+  }
+
+  .admin-icon-button {
+    @apply grid h-10 w-10 place-items-center border bg-ink-800 text-slate-200 transition hover:bg-ink-700;
+    border-color: var(--admin-border);
+    border-radius: calc(var(--admin-radius) - 2px);
+  }
+
+  .admin-nav-button {
+    @apply flex h-11 w-full items-center gap-3 border px-3 text-left text-sm font-bold transition;
+    border-color: var(--admin-border);
+    border-radius: calc(var(--admin-radius) - 2px);
+    background: var(--admin-surface-strong);
+    color: var(--admin-text);
+  }
+
+  .admin-nav-button:hover {
+    background: var(--admin-surface-hover);
+  }
+
+  .admin-nav-button-active {
+    border-color: var(--admin-border-strong);
+    background: var(--admin-accent);
+    color: var(--admin-accent-text);
+  }
+
+  .admin-toast {
+    @apply pointer-events-auto flex w-full max-w-sm items-start gap-3 border p-3 text-sm shadow-panel;
+    border-color: var(--admin-border);
+    border-radius: var(--admin-radius);
+    background: var(--admin-surface);
+    color: var(--admin-text);
+  }
+
+  .admin-toast-success {
+    border-color: rgba(110, 231, 183, 0.45);
+  }
+
+  .admin-toast-error {
+    border-color: rgba(255, 107, 107, 0.55);
+  }
+
+  .admin-toast-info {
+    border-color: rgba(245, 200, 75, 0.45);
+  }
+}
