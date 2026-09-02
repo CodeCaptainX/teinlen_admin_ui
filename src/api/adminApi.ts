@@ -27,13 +27,16 @@ export interface GameRecordCard {
   rank?: string
   suit?: string
   label?: string
+  code?: string
+  card?: string
+  value?: string
   strength?: number
 }
 
 export interface GameRecordPlayedSet {
   player_id: number
   seat_number: number
-  cards: GameRecordCard[]
+  cards: Array<GameRecordCard | string>
   is_pass: boolean
   combination?: string
 }

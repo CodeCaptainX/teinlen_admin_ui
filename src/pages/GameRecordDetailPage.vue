@@ -113,7 +113,7 @@
                     {{ play.is_pass ? 'Pass' : play.combination || 'Play' }}
                   </span>
                   <div class="flex flex-wrap gap-1.5">
-                    <span v-for="card in play.cards || []" :key="`${index}-${card.id}`" class="rounded border border-white/10 bg-ink-900 px-2 py-1 font-mono text-xs font-black" :class="cardSuitClass(card)">
+                    <span v-for="(card, cardIndex) in play.cards || []" :key="cardKey(card, `${index}-${cardIndex}`)" class="rounded border border-white/10 bg-ink-900 px-2 py-1 font-mono text-xs font-black" :class="cardSuitClass(card)">
                       {{ cardLabel(card) }}
                     </span>
                     <span v-if="!play.cards?.length" class="text-xs text-slate-500">No cards</span>
@@ -287,12 +287,24 @@ const outcomePillClass = (outcome = ''): string => {
   return 'bg-slate-500/15 text-slate-300'
 }
 
-// cardLabel renders stored snapshot cards even when older rows only contain ids.
-const cardLabel = (card: GameRecordCard): string => card.label || `${card.rank || '?'}${card.suit || ''}`
+// cardKey keeps card lists stable when history snapshots store compact string cards instead of database ids.
+const cardKey = (card: GameRecordCard | string, fallback: string): string => {
+  if (typeof card === 'string') return `${fallback}-${card}`
+  return `${fallback}-${card.id || card.label || card.code || card.card || card.value || card.rank || 'card'}`
+}
+
+// cardLabel renders stored snapshot cards, including compact values like "2H" from older play history rows.
+const cardLabel = (card: GameRecordCard | string): string => {
+  if (typeof card === 'string') return card
+  if (card.label || card.code || card.card || card.value) return card.label || card.code || card.card || card.value || ''
+  if (card.rank || card.suit) return `${card.rank || 'Unknown'}${card.suit || ''}`
+  return card.id ? `Card #${card.id}` : 'Unknown card'
+}
 
 // cardSuitClass gives red suits a different tone while keeping compact text cards readable.
-const cardSuitClass = (card: GameRecordCard): string => {
-  if (card.suit === 'D' || card.suit === 'H') return 'text-coral'
+const cardSuitClass = (card: GameRecordCard | string): string => {
+  const label = typeof card === 'string' ? card : card.suit || card.label || card.code || card.card || card.value || ''
+  if (label.endsWith('D') || label.endsWith('H')) return 'text-coral'
   return 'text-slate-100'
 }
 

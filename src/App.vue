@@ -145,25 +145,16 @@
         </button>
       </aside>
 
-      <AdminDashboardPage v-if="activeRoute.name === 'dashboard'" @navigate="navigate" @unauthenticated="handleUnauthenticated" />
-      <GameBetsPage v-else-if="activeRoute.name === 'game-bets'" @unauthenticated="handleUnauthenticated" />
-      <AuditPage v-else-if="activeRoute.name === 'audit'" @unauthenticated="handleUnauthenticated" />
-      <MembersPage v-else-if="activeRoute.name === 'members'" @unauthenticated="handleUnauthenticated" />
-      <UsersPage v-else-if="activeRoute.name === 'users'" @unauthenticated="handleUnauthenticated" />
-      <GameRecordDetailPage
-        v-else-if="activeRoute.name === 'game-record-detail'"
-        :game-round-id="activeRoute.gameRoundId || 0"
-        @navigate="navigate"
-        @unauthenticated="handleUnauthenticated"
-      />
-      <AdminPlaceholderPage
-        v-else-if="placeholderPage"
-        :title="placeholderPage.title"
-        :subtitle="placeholderPage.subtitle"
-        :icon="placeholderPage.icon"
-        :empty-text="placeholderPage.emptyText"
-      />
-      <GameRecordsPage v-else-if="activeRoute.name === 'game-records'" @navigate="navigate" @unauthenticated="handleUnauthenticated" />
+      <div class="admin-page-scroll">
+        <RouterView v-slot="{ Component }">
+          <component
+            :is="Component"
+            :game-round-id="activeRoute.gameRoundId || 0"
+            @navigate="navigate"
+            @unauthenticated="handleUnauthenticated"
+          />
+        </RouterView>
+      </div>
     </section>
 
     <ToastBar :toasts="toasts" @dismiss="dismissToast" />
@@ -173,29 +164,22 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { Icon } from '@iconify/vue'
+import { RouterView, useRoute, useRouter } from 'vue-router'
 import { ADMIN_AUTH_EXPIRED_EVENT, apiBaseUrl, clearStoredToken, getStoredToken, loginAdmin } from './api/adminApi'
 import ToastBar, { type ToastKind, type ToastMessage } from './components/ToastBar.vue'
-import AuditPage from './pages/AuditPage.vue'
-import AdminDashboardPage from './pages/AdminDashboardPage.vue'
-import AdminPlaceholderPage from './pages/AdminPlaceholderPage.vue'
-import GameBetsPage from './pages/GameBetsPage.vue'
-import GameRecordDetailPage from './pages/GameRecordDetailPage.vue'
-import GameRecordsPage from './pages/GameRecordsPage.vue'
-import MembersPage from './pages/MembersPage.vue'
-import UsersPage from './pages/UsersPage.vue'
 import { routeFromPath, sidebarRoutes } from './router/adminRoutes'
 
+const route = useRoute()
+const router = useRouter()
 const loginForm = reactive({ username: '', password: '' })
 const loginLoading = ref(false)
 const errorMessage = ref('')
 const isAuthenticated = ref(Boolean(getStoredToken()))
-const currentPath = ref(window.location.pathname)
 const sidebarOpen = ref(false)
 const toastId = ref(0)
 const toasts = ref<ToastMessage[]>([])
 
-const activeRoute = computed(() => routeFromPath(currentPath.value))
-const placeholderPage = computed(() => placeholderContent(activeRoute.value.name))
+const activeRoute = computed(() => routeFromPath(route.path))
 const adminRoutes = sidebarRoutes
 // loginMetrics keeps the unauthenticated screen aligned with the major admin work areas.
 const loginMetrics = [
@@ -211,7 +195,7 @@ const submitLogin = async (): Promise<void> => {
   try {
     await loginAdmin(loginForm.username, loginForm.password)
     isAuthenticated.value = true
-    normalizeCurrentPath()
+    await normalizeCurrentRoute()
     showToast('success', 'Signed in', 'Admin session is ready.')
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : 'Login failed'
@@ -222,10 +206,9 @@ const submitLogin = async (): Promise<void> => {
 }
 
 // navigate updates browser history so each admin page can be opened directly or refreshed.
-const navigate = (path: string): void => {
+const navigate = async (path: string): Promise<void> => {
   const nextRoute = routeFromPath(path)
-  window.history.pushState({}, '', nextRoute.path)
-  currentPath.value = nextRoute.path
+  await router.push(nextRoute.path)
   closeSidebar()
 }
 
@@ -270,44 +253,12 @@ const dismissToast = (id: number): void => {
   toasts.value = toasts.value.filter((toast) => toast.id !== id)
 }
 
-// placeholderContent gives new sidebar pages a real route while backend workflows are added later.
-const placeholderContent = (routeName: string): { title: string; subtitle: string; icon: string; emptyText: string } | null => {
-  if (routeName === 'members') {
-    return {
-      title: 'Members',
-      subtitle: 'Member account and player profile management',
-      icon: 'mdi:account-group',
-      emptyText: 'This page is ready for the member management table and actions.',
-    }
+// normalizeCurrentRoute lets Vue Router own fallback cleanup for direct browser entries.
+const normalizeCurrentRoute = async (): Promise<void> => {
+  const nextRoute = routeFromPath(route.path)
+  if (nextRoute.path !== route.path) {
+    await router.replace(nextRoute.path)
   }
-  if (routeName === 'users') {
-    return {
-      title: 'Users',
-      subtitle: 'Admin user access and account controls',
-      icon: 'mdi:account-circle',
-      emptyText: 'This page is ready for user search, roles, and status controls.',
-    }
-  }
-  if (routeName === 'game-bets') {
-    return null
-  }
-  return null
-}
-
-// normalizeCurrentPath replaces unknown paths with the dashboard route to avoid blank admin screens.
-const normalizeCurrentPath = (): void => {
-  const route = routeFromPath(window.location.pathname)
-  if (route.path !== window.location.pathname) {
-    window.history.replaceState({}, '', route.path)
-    currentPath.value = route.path
-    return
-  }
-  currentPath.value = route.path
-}
-
-// handlePopState keeps shell state synchronized with the browser back and forward buttons.
-const handlePopState = (): void => {
-  currentPath.value = routeFromPath(window.location.pathname).path
 }
 
 // handleAuthExpired reacts to global API interceptor events from invalid or expired admin sessions.
@@ -316,13 +267,11 @@ const handleAuthExpired = (): void => {
 }
 
 onMounted(() => {
-  normalizeCurrentPath()
-  window.addEventListener('popstate', handlePopState)
+  void normalizeCurrentRoute()
   window.addEventListener(ADMIN_AUTH_EXPIRED_EVENT, handleAuthExpired)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('popstate', handlePopState)
   window.removeEventListener(ADMIN_AUTH_EXPIRED_EVENT, handleAuthExpired)
 })
 </script>

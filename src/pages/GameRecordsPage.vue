@@ -288,12 +288,18 @@ const outcomeClass = (outcome = ''): string => {
   return 'text-slate-200'
 }
 
-// cardLabel renders stored snapshot cards even when older rows only contain ids.
-const cardLabel = (card: GameRecordCard): string => card.label || `${card.rank || '?'}${card.suit || ''}`
+// cardLabel renders stored snapshot cards, including compact values like "2H" from older rows.
+const cardLabel = (card: GameRecordCard | string): string => {
+  if (typeof card === 'string') return card
+  if (card.label || card.code || card.card || card.value) return card.label || card.code || card.card || card.value || ''
+  if (card.rank || card.suit) return `${card.rank || 'Unknown'}${card.suit || ''}`
+  return card.id ? `Card #${card.id}` : 'Unknown card'
+}
 
 // cardSuitClass gives red suits a different tone while keeping compact text cards readable.
-const cardSuitClass = (card: GameRecordCard): string => {
-  if (card.suit === 'D' || card.suit === 'H') return 'text-coral'
+const cardSuitClass = (card: GameRecordCard | string): string => {
+  const label = typeof card === 'string' ? card : card.suit || card.label || card.code || card.card || card.value || ''
+  if (label.endsWith('D') || label.endsWith('H')) return 'text-coral'
   return 'text-slate-100'
 }
 

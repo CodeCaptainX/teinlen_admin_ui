@@ -54,6 +54,10 @@ select {
     @apply flex h-screen w-full flex-col overflow-hidden px-4 py-4 sm:px-5 sm:py-5;
   }
 
+  .admin-page-scroll {
+    @apply min-h-0 flex-1 overflow-y-auto overflow-x-hidden;
+  }
+
   .admin-panel {
     @apply border bg-ink-900 shadow-panel;
     border-color: var(--admin-border);
