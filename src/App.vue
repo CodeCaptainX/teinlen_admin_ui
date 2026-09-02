@@ -183,7 +183,7 @@ import GameRecordDetailPage from './pages/GameRecordDetailPage.vue'
 import GameRecordsPage from './pages/GameRecordsPage.vue'
 import MembersPage from './pages/MembersPage.vue'
 import UsersPage from './pages/UsersPage.vue'
-import { adminRoutes, routeFromPath } from './router/adminRoutes'
+import { routeFromPath, sidebarRoutes } from './router/adminRoutes'
 
 const loginForm = reactive({ username: '', password: '' })
 const loginLoading = ref(false)
@@ -196,6 +196,7 @@ const toasts = ref<ToastMessage[]>([])
 
 const activeRoute = computed(() => routeFromPath(currentPath.value))
 const placeholderPage = computed(() => placeholderContent(activeRoute.value.name))
+const adminRoutes = sidebarRoutes
 // loginMetrics keeps the unauthenticated screen aligned with the major admin work areas.
 const loginMetrics = [
   { label: 'Games', value: 'Records', icon: 'mdi:cards-playing' },
