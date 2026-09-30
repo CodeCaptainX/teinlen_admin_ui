@@ -202,6 +202,14 @@ export interface CreateRoomRequest {
   turn_timeout_seconds?: number
 }
 
+// UpdateRoomRequest edits a parent room. room_code is not editable (it identifies the room in history).
+export interface UpdateRoomRequest {
+  room_name: string
+  entry_fee: number
+  status_id: number
+  order: number
+}
+
 export interface RankPayoutRequest {
   rank: number
   payout_percent: number
@@ -398,6 +406,16 @@ interface UpdateRoomPayoutConfigResponse {
   data: GamePayoutConfig[]
 }
 
+interface RoomListResponse {
+  data: {
+    rooms: Room[]
+  }
+}
+
+interface UpdateRoomResponse {
+  data: Room
+}
+
 interface UpdateRoomConfigurationResponse {
   data: RoomConfiguration
 }
@@ -560,6 +578,18 @@ export async function listRoomConfigurations(): Promise<RoomConfiguration[]> {
 // updateRoomConfiguration saves gameplay timing used by future game starts.
 export async function updateRoomConfiguration(roomId: number, request: UpdateRoomConfigurationRequest): Promise<RoomConfiguration> {
   const response = await client.put<UpdateRoomConfigurationResponse>(`/api/v1/tienlen/rooms/${roomId}/configuration`, request)
+  return response.data.data
+}
+
+// listRooms fetches every parent room (name, entry fee, status, order, turn timeout) for room setup.
+export async function listRooms(): Promise<Room[]> {
+  const response = await client.get<RoomListResponse>('/api/v1/tienlen/room')
+  return response.data.data.rooms ?? []
+}
+
+// updateRoom saves a parent room's name, entry fee, status and order.
+export async function updateRoom(roomId: number, request: UpdateRoomRequest): Promise<Room> {
+  const response = await client.put<UpdateRoomResponse>(`/api/v1/tienlen/rooms/${roomId}`, request)
   return response.data.data
 }
 

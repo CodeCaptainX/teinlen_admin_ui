@@ -40,19 +40,20 @@
     </section>
 
     <section v-if="activeTab === 'room-setup'" class="grid flex-1 gap-4 lg:grid-cols-[minmax(320px,420px)_1fr]">
-      <form class="admin-panel h-max p-4" @submit.prevent="createRoom">
+      <form class="admin-panel h-max p-4" @submit.prevent="editingRoomId ? saveRoom() : createRoom()">
         <div class="mb-4 flex items-center justify-between gap-3 border-b border-white/10 pb-3">
           <div>
-            <h2 class="font-black">Create Room</h2>
-            <p class="text-sm text-slate-400">New entry fee with default payout configs</p>
+            <h2 class="font-black">{{ editingRoomId ? 'Edit Room' : 'Create Room' }}</h2>
+            <p class="text-sm text-slate-400">{{ editingRoomId ? 'New entry fee applies from the next round' : 'New entry fee with default payout configs' }}</p>
           </div>
-          <Icon icon="mdi:door-open" class="h-5 w-5 text-gold" />
+          <Icon :icon="editingRoomId ? 'mdi:pencil' : 'mdi:door-open'" class="h-5 w-5 text-gold" />
         </div>
 
         <div class="grid gap-3">
           <label class="grid gap-1 text-sm font-bold text-slate-300">
             Room Code
-            <input v-model.trim="roomForm.room_code" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="TL-011" />
+            <input v-model.trim="roomForm.room_code" :disabled="Boolean(editingRoomId)" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2 disabled:opacity-60" placeholder="TL-011" />
+            <span v-if="editingRoomId" class="text-xs font-normal text-slate-500">Room code can't be changed</span>
           </label>
           <label class="grid gap-1 text-sm font-bold text-slate-300">
             Room Name
@@ -62,7 +63,20 @@
             Entry Fee
             <input v-model.number="roomForm.entry_fee" type="number" min="1" step="1" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="2000000" />
           </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-300">
+          <template v-if="editingRoomId">
+            <label class="grid gap-1 text-sm font-bold text-slate-300">
+              Status
+              <select v-model.number="roomForm.status_id" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2">
+                <option :value="1">Active</option>
+                <option :value="2">Inactive</option>
+              </select>
+            </label>
+            <label class="grid gap-1 text-sm font-bold text-slate-300">
+              Order
+              <input v-model.number="roomForm.order" type="number" min="1" step="1" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" />
+            </label>
+          </template>
+          <label v-else class="grid gap-1 text-sm font-bold text-slate-300">
             Turn Timeout
             <div class="relative">
               <Icon icon="mdi:timer-sand" class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
@@ -70,9 +84,12 @@
               <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black uppercase text-slate-500">Sec</span>
             </div>
           </label>
-          <button class="mt-2 flex h-10 items-center justify-center gap-2 rounded-md bg-gold px-4 text-sm font-black text-ink-950 disabled:opacity-50" :disabled="creatingRoom">
-            <Icon :icon="creatingRoom ? 'mdi:loading' : 'mdi:plus'" class="h-5 w-5" :class="{ 'animate-spin': creatingRoom }" />
-            Create Room
+          <button class="mt-2 flex h-10 items-center justify-center gap-2 rounded-md bg-gold px-4 text-sm font-black text-ink-950 disabled:opacity-50" :disabled="creatingRoom || savingRoom">
+            <Icon :icon="creatingRoom || savingRoom ? 'mdi:loading' : (editingRoomId ? 'mdi:content-save' : 'mdi:plus')" class="h-5 w-5" :class="{ 'animate-spin': creatingRoom || savingRoom }" />
+            {{ editingRoomId ? 'Save Room' : 'Create Room' }}
+          </button>
+          <button v-if="editingRoomId" type="button" class="flex h-10 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-4 text-sm font-black text-slate-100 hover:bg-ink-700" @click="cancelRoomEdit">
+            Cancel
           </button>
         </div>
       </form>
@@ -82,16 +99,25 @@
           <h2 class="font-black">Configured Rooms</h2>
         </div>
         <div class="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3">
-          <div v-for="room in payoutRoomSummaries" :key="room.roomId" class="rounded-md border border-white/10 bg-ink-800 p-3">
-            <div class="mb-2 flex items-center justify-between gap-3">
-              <strong>{{ room.roomCode || `Room ${room.roomId}` }}</strong>
-              <span class="text-xs text-gold">{{ formatMoney(room.entryFee) }}</span>
+          <div v-for="room in rooms" :key="room.id" class="rounded-md border bg-ink-800 p-3" :class="editingRoomId === room.id ? 'border-gold/60' : 'border-white/10'">
+            <div class="mb-1 flex items-center justify-between gap-3">
+              <strong>{{ room.code || `Room ${room.id}` }}</strong>
+              <span class="text-xs text-gold">{{ formatMoney(room.entry_fee) }}</span>
             </div>
-            <p class="mb-3 text-xs text-slate-400">{{ room.configCount }} payout rows configured</p>
-            <button class="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 transition hover:bg-ink-700" @click="editRoomTurnTimeout(room.roomId)">
-              <Icon icon="mdi:timer-edit" class="h-4 w-4 text-gold" />
-              Edit Turn Timeout
-            </button>
+            <div class="mb-3 flex items-center justify-between gap-2 text-xs text-slate-400">
+              <span class="truncate">{{ room.name }} · #{{ room.sort_order }}</span>
+              <span :class="room.status_id === 1 ? 'text-emerald-300' : 'text-slate-500'">{{ room.status_id === 1 ? 'Active' : 'Inactive' }}</span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+              <button class="flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 transition hover:bg-ink-700" @click="startRoomEdit(room)">
+                <Icon icon="mdi:pencil" class="h-4 w-4 text-gold" />
+                Edit Room
+              </button>
+              <button class="flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 transition hover:bg-ink-700" @click="editRoomTurnTimeout(room.id)">
+                <Icon icon="mdi:timer-edit" class="h-4 w-4 text-gold" />
+                Turn Timeout
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -481,6 +507,8 @@ import {
   listGameSpecialPayoutRules,
   listGameSpecialPayouts,
   listRoomConfigurations,
+  listRooms,
+  updateRoom,
   updateRoomConfiguration,
   updateRoomPayoutConfigs,
   updateRoomSpecialPayoutRule,
@@ -488,6 +516,7 @@ import {
   type GameRoundBet,
   type GameSpecialPayout,
   type GameSpecialPayoutRule,
+  type Room,
   type RoomConfiguration,
 } from '../api/adminApi'
 
@@ -510,6 +539,10 @@ const payoutConfigs = ref<GamePayoutConfig[]>([])
 const specialRules = ref<GameSpecialPayoutRule[]>([])
 const specialPayouts = ref<GameSpecialPayout[]>([])
 const roomConfigurations = ref<RoomConfiguration[]>([])
+const rooms = ref<Room[]>([])
+// editingRoomId switches the Room Setup form from "create" to "edit this room" (0 = creating).
+const editingRoomId = ref(0)
+const savingRoom = ref(false)
 const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
@@ -524,6 +557,7 @@ const roomForm = reactive({
   room_name: 'TienLen Room',
   entry_fee: 0,
   status_id: 1,
+  order: 1,
   turn_timeout_seconds: 10,
 })
 const payoutEdits = ref<Record<string, PayoutEdit>>({})
@@ -766,6 +800,75 @@ const loadRoomConfigurations = async (): Promise<void> => {
   }
 }
 
+// loadRooms reads the parent rooms shown as Configured Rooms (name, fee, status, order).
+const loadRooms = async (): Promise<void> => {
+  try {
+    rooms.value = await listRooms()
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Unable to load rooms'
+    if (String(errorMessage.value).includes('401')) emit('unauthenticated')
+  }
+}
+
+// startRoomEdit fills the Room Setup form with one room so it can be edited in place.
+const startRoomEdit = (room: Room): void => {
+  errorMessage.value = ''
+  successMessage.value = ''
+  editingRoomId.value = room.id
+  roomForm.room_code = room.code
+  roomForm.room_name = room.name
+  roomForm.entry_fee = room.entry_fee
+  roomForm.status_id = room.status_id
+  roomForm.order = room.sort_order
+}
+
+// cancelRoomEdit returns the form to "create room" with its defaults.
+const cancelRoomEdit = (): void => {
+  editingRoomId.value = 0
+  roomForm.room_code = ''
+  roomForm.room_name = 'TienLen Room'
+  roomForm.entry_fee = 0
+  roomForm.status_id = 1
+  roomForm.order = 1
+}
+
+// saveRoom validates and saves the room being edited, then refreshes every list that shows room data
+// (payout configs and timing rows carry the room's code/name/fee too).
+const saveRoom = async (): Promise<void> => {
+  errorMessage.value = ''
+  successMessage.value = ''
+  if (!roomForm.room_name.trim()) {
+    errorMessage.value = 'Room name is required'
+    return
+  }
+  if (roomForm.entry_fee <= 0) {
+    errorMessage.value = 'Entry fee must be greater than zero'
+    return
+  }
+  if (!Number.isInteger(roomForm.order) || roomForm.order <= 0) {
+    errorMessage.value = 'Order must be a whole number greater than zero'
+    return
+  }
+
+  savingRoom.value = true
+  try {
+    const saved = await updateRoom(editingRoomId.value, {
+      room_name: roomForm.room_name.trim(),
+      entry_fee: roomForm.entry_fee,
+      status_id: roomForm.status_id,
+      order: roomForm.order,
+    })
+    successMessage.value = `Room ${saved.code} updated`
+    cancelRoomEdit()
+    await Promise.all([loadRooms(), loadPayoutConfigs(), loadRoomConfigurations()])
+  } catch (error) {
+    errorMessage.value = error instanceof Error ? error.message : 'Unable to update room'
+    if (String(errorMessage.value).includes('401')) emit('unauthenticated')
+  } finally {
+    savingRoom.value = false
+  }
+}
+
 // editRoomTurnTimeout moves operators from room cards directly to the matching turn-timeout control.
 const editRoomTurnTimeout = (roomId: number): void => {
   selectedRoomConfigurationId.value = roomId
@@ -801,7 +904,7 @@ const createRoom = async (): Promise<void> => {
     roomForm.room_code = ''
     roomForm.entry_fee = 0
     successMessage.value = 'Room created with default payout configs'
-    await Promise.all([loadPayoutConfigs(), loadRoomConfigurations()])
+    await Promise.all([loadRooms(), loadPayoutConfigs(), loadRoomConfigurations()])
     selectedRoomConfigurationId.value = result.room.id
     activeTab.value = 'turn-timeout'
   } catch (error) {
@@ -919,7 +1022,7 @@ const refreshPage = async (): Promise<void> => {
     return
   }
   if (activeTab.value === 'room-setup') {
-    await Promise.all([loadPayoutConfigs(), loadRoomConfigurations()])
+    await Promise.all([loadRooms(), loadPayoutConfigs(), loadRoomConfigurations()])
     return
   }
   if (activeTab.value === 'turn-timeout') {
@@ -1004,6 +1107,7 @@ watch(roomConfigurations, syncRoomConfigurationEdits, { immediate: true })
 
 onMounted(() => {
   void loadBets()
+  void loadRooms()
   void loadPayoutConfigs()
   void loadRoomConfigurations()
   void loadSpecialPayoutRules()
