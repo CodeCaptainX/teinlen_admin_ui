@@ -56,6 +56,14 @@ export const adminRoutes: AdminRoute[] = [
     component: () => import('@/pages/GameBetsPage.vue'),
   },
   {
+    // Maintenance: suspend the website, all games, or one room (tbl_game_suspensions).
+    path: '/admin/maintenance',
+    name: 'maintenance',
+    label: 'Maintenance',
+    icon: 'mdi:tools',
+    component: () => import('@/pages/SuspensionsPage.vue'),
+  },
+  {
     path: '/admin/audit',
     name: 'audit',
     label: 'Audit',

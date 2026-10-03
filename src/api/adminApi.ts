@@ -93,6 +93,114 @@ export interface GameRoundBet {
   settled_at?: string
   created_at: string
   updated_at?: string
+  // Latest admin refund request for this bet; empty when an admin never asked to refund it.
+  refund_request_id?: number
+  refund_request_status?: BetRefundRequestStatus
+  refund_failure_reason?: string
+}
+
+// BetRefundRequestStatus mirrors tbl_game_bet_refund_requests.status: the member API moves the money and
+// turns `pending` into `done`, or `failed` with a reason the admin can read.
+export type BetRefundRequestStatus = 'pending' | 'done' | 'failed'
+
+export interface BetRefundRequest {
+  id: number
+  bet_id: number
+  hold_key: string
+  member_id: number
+  amount: number
+  status: BetRefundRequestStatus
+  reason: string
+  failure_reason?: string
+  requested_by: number
+  requested_at: string
+  processed_at?: string
+}
+
+// AdminCommandResult is returned by actions the member API applies asynchronously. commandWarning is set
+// when the change was saved but the game server was not notified right away (it applies within ~30s).
+export interface AdminCommandResult<T> {
+  record: T
+  commandWarning: string
+}
+
+// Suspension scopes match tbl_game_suspension_scopes.code.
+export type SuspensionScope = 'site' | 'all_games' | 'room'
+// RunningRoundPolicy decides what happens to rounds already playing when a suspension starts.
+export type RunningRoundPolicy = 'drain' | 'force_stop'
+
+export interface GameSuspension {
+  id: number
+  uuid: string
+  scope: SuspensionScope
+  scope_name: string
+  room_id?: number
+  room_code?: string
+  room_name?: string
+  running_round_policy: RunningRoundPolicy
+  status: 'active' | 'ended'
+  message: string
+  expected_back_at?: string
+  started_by: number
+  started_by_name: string
+  started_at: string
+  ended_by?: number
+  ended_by_name?: string
+  ended_at?: string
+  end_note?: string
+}
+
+export interface SuspensionScopeOption {
+  id: number
+  code: SuspensionScope
+  name: string
+  requires_room: boolean
+  order: number
+}
+
+export interface ActiveSuspensions {
+  records: GameSuspension[]
+  scopes: SuspensionScopeOption[]
+}
+
+export interface GameSuspensionList {
+  records: GameSuspension[]
+  page: number
+  perPage: number
+  total: number
+}
+
+export interface StartSuspensionRequest {
+  scope: SuspensionScope
+  room_id?: number
+  running_round_policy: RunningRoundPolicy
+  message: string
+  expected_back_at?: string
+}
+
+interface ActiveSuspensionsResponse {
+  data: ActiveSuspensions
+}
+
+interface GameSuspensionListResponse {
+  data: GameSuspension[]
+  page: number
+  per_page: number
+  total: number
+}
+
+interface SuspensionChangeResponse {
+  data: {
+    suspension: GameSuspension
+    command_warning?: string
+  }
+}
+
+interface BetRefundResponse {
+  data: {
+    request: BetRefundRequest
+    command_warning?: string
+  }
 }
 
 export interface GameRoundBetList {
@@ -503,6 +611,17 @@ function isAuthFailure(error: unknown): boolean {
   return status === 422 && responseData?.status_code === -500 && /session|token|jwt|authorization/.test(message)
 }
 
+// apiErrorMessage returns the backend's own error text (for example "bet is already settled") when there is
+// one, so admins see why an action was refused instead of a generic "status code 400".
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (axios.isAxiosError(error)) {
+    const responseData = error.response?.data as { message?: string; data?: { error?: string } } | undefined
+    const detail = responseData?.data?.error || responseData?.message
+    if (detail) return detail
+  }
+  return error instanceof Error ? error.message : fallback
+}
+
 // loginAdmin authenticates with the admin API and stores the returned bearer token for later requests.
 export async function loginAdmin(username: string, password: string): Promise<LoginResult> {
   const response = await client.post<LoginResponse>('/api/v1/auth/login', { username, password })
@@ -693,6 +812,48 @@ export async function listMembers(page: number, perPage: number, search = ''): P
 export async function createMember(request: CreateMemberRequest): Promise<Member> {
   const response = await client.post<MemberCreateResponse>('/api/v1/members/', request)
   return response.data.data
+}
+
+// listActiveSuspensions fetches what is suspended right now plus the scope options for the suspend form.
+export async function listActiveSuspensions(): Promise<ActiveSuspensions> {
+  const response = await client.get<ActiveSuspensionsResponse>('/api/v1/suspensions/active')
+  return response.data.data
+}
+
+// listSuspensionHistory fetches suspension history newest first with standard admin pagination.
+export async function listSuspensionHistory(page: number, perPage: number): Promise<GameSuspensionList> {
+  const response = await client.get<GameSuspensionListResponse>('/api/v1/suspensions/', {
+    params: {
+      'paging_options[page]': page,
+      'paging_options[per_page]': perPage,
+    },
+  })
+
+  return {
+    records: response.data.data,
+    page: response.data.page,
+    perPage: response.data.per_page,
+    total: response.data.total,
+  }
+}
+
+// startSuspension suspends the website, all games, or one room. The member API applies it right away.
+export async function startSuspension(request: StartSuspensionRequest): Promise<AdminCommandResult<GameSuspension>> {
+  const response = await client.post<SuspensionChangeResponse>('/api/v1/suspensions/', request)
+  return { record: response.data.data.suspension, commandWarning: response.data.data.command_warning || '' }
+}
+
+// endSuspension resumes one active suspension, with an optional note kept in the history.
+export async function endSuspension(suspensionId: number, note: string): Promise<AdminCommandResult<GameSuspension>> {
+  const response = await client.post<SuspensionChangeResponse>(`/api/v1/suspensions/${suspensionId}/end`, { note })
+  return { record: response.data.data.suspension, commandWarning: response.data.data.command_warning || '' }
+}
+
+// requestBetRefund asks the member API to refund one held/unsettled bet. The result starts as `pending`;
+// the ledger shows `done` or `failed` once the member API has processed it.
+export async function requestBetRefund(betId: number, reason: string): Promise<AdminCommandResult<BetRefundRequest>> {
+  const response = await client.post<BetRefundResponse>(`/api/v1/tienlen/bets/${betId}/refund`, { reason })
+  return { record: response.data.data.request, commandWarning: response.data.data.command_warning || '' }
 }
 
 export function getStoredToken(): string {

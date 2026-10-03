@@ -414,6 +414,7 @@
               <th class="px-4 py-3 font-black">Payout</th>
               <th class="px-4 py-3 font-black">Status</th>
               <th class="px-4 py-3 font-black">Created</th>
+              <th class="px-4 py-3 font-black">Refund</th>
             </tr>
           </thead>
           <tbody>
@@ -432,11 +433,57 @@
                 </span>
               </td>
               <td class="px-4 py-3 text-slate-300">{{ formatDate(record.created_at) }}</td>
+              <td class="px-4 py-3">
+                <!-- Refund is offered only for escrowed bets; the game server still refuses it while the round is live. -->
+                <span v-if="record.refund_request_status" class="mb-1 block w-max rounded px-2 py-1 text-xs font-black" :class="refundStatusClass(record.refund_request_status)" :title="record.refund_failure_reason || ''">
+                  Refund {{ record.refund_request_status }}
+                </span>
+                <span v-if="record.refund_request_status === 'failed' && record.refund_failure_reason" class="mb-1 block max-w-56 text-xs text-coral">{{ record.refund_failure_reason }}</span>
+                <button
+                  v-if="canRequestRefund(record)"
+                  class="flex h-8 items-center gap-1 rounded-md border border-coral/40 bg-coral/10 px-3 text-xs font-black text-coral transition hover:bg-coral/20"
+                  @click="openRefundDialog(record)"
+                >
+                  <Icon icon="mdi:cash-refund" class="h-4 w-4" />
+                  {{ record.refund_request_status === 'failed' ? 'Retry refund' : 'Refund' }}
+                </button>
+                <span v-else-if="!record.refund_request_status" class="text-xs text-slate-500">-</span>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
+
+    <!-- Refund confirmation: a reason is required because this returns money outside the normal round flow. -->
+    <div v-if="refundTarget" class="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" @click.self="closeRefundDialog">
+      <form class="admin-panel w-full max-w-md p-5" @submit.prevent="submitRefund">
+        <div class="mb-4 flex items-start justify-between gap-3">
+          <div>
+            <h2 class="font-black">Refund bet</h2>
+            <p class="text-sm text-slate-400">
+              Member #{{ refundTarget.member_id }} · {{ formatMoney(refundTarget.amount) }} · P{{ refundTarget.parent_room_id }} / I{{ refundTarget.inner_room_id }} · Round {{ refundTarget.round_number }}
+            </p>
+          </div>
+          <Icon icon="mdi:cash-refund" class="h-6 w-6 text-coral" />
+        </div>
+        <p class="mb-3 rounded-md border border-gold/30 bg-gold/10 px-3 py-2 text-xs text-gold">
+          The game server refuses a refund while this bet's round is still playing. Suspend the room with "Force stop" first, or wait for the round to end.
+        </p>
+        <label class="mb-4 grid gap-1 text-sm font-bold text-slate-300">
+          Reason
+          <textarea v-model="refundReason" rows="3" maxlength="255" class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="Player was charged but the round never started" />
+        </label>
+        <p v-if="refundError" class="mb-3 rounded-md border border-coral/40 bg-coral/10 px-3 py-2 text-sm text-coral">{{ refundError }}</p>
+        <div class="flex justify-end gap-2">
+          <button type="button" class="h-10 rounded-md border border-white/10 bg-ink-900 px-4 text-sm font-black text-slate-100 hover:bg-ink-700" @click="closeRefundDialog">Cancel</button>
+          <button class="flex h-10 items-center gap-2 rounded-md bg-coral px-4 text-sm font-black text-ink-950 disabled:opacity-60" :disabled="refundSubmitting || !refundReason.trim()">
+            <Icon :icon="refundSubmitting ? 'mdi:loading' : 'mdi:cash-refund'" class="h-4 w-4" :class="{ 'animate-spin': refundSubmitting }" />
+            Confirm refund
+          </button>
+        </div>
+      </form>
+    </div>
 
     <section v-if="activeTab === 'overview'" class="grid flex-1 gap-4 lg:grid-cols-2">
       <div class="admin-panel overflow-hidden">
@@ -512,6 +559,9 @@ import {
   updateRoomConfiguration,
   updateRoomPayoutConfigs,
   updateRoomSpecialPayoutRule,
+  requestBetRefund,
+  apiErrorMessage,
+  type BetRefundRequestStatus,
   type GamePayoutConfig,
   type GameRoundBet,
   type GameSpecialPayout,
@@ -1091,6 +1141,70 @@ const partyLabel = (value: string): string => {
   if (value === 'beaten_player') return 'Beaten player'
   if (value === 'beating_player') return 'Beating player'
   return value || '-'
+}
+
+// Refund dialog state. refundTarget is the bet being refunded; null means the dialog is closed.
+const refundTarget = ref<GameRoundBet | null>(null)
+const refundReason = ref('')
+const refundError = ref('')
+const refundSubmitting = ref(false)
+
+// REFUND_STATUS_REFRESH_MS is how long to wait before reloading the ledger after a refund request, giving the
+// game server time to process it so the row shows done/failed instead of pending.
+const REFUND_STATUS_REFRESH_MS = 1500
+
+// canRequestRefund offers the button only for escrowed bets (held/unsettled) with no pending or completed
+// refund. A failed request can be retried after its cause is fixed.
+const canRequestRefund = (record: GameRoundBet): boolean => {
+  const escrowed = record.status === 'held' || record.status === 'unsettled'
+  const openRequest = record.refund_request_status === 'pending' || record.refund_request_status === 'done'
+  return escrowed && !openRequest
+}
+
+// openRefundDialog starts a refund for one bet with an empty reason.
+const openRefundDialog = (record: GameRoundBet): void => {
+  refundTarget.value = record
+  refundReason.value = ''
+  refundError.value = ''
+}
+
+// closeRefundDialog cancels the refund unless a request is already being sent.
+const closeRefundDialog = (): void => {
+  if (refundSubmitting.value) return
+  refundTarget.value = null
+}
+
+// submitRefund records the refund request, then reloads the ledger shortly after so the row shows whether
+// the game server completed or refused it.
+const submitRefund = async (): Promise<void> => {
+  const target = refundTarget.value
+  if (!target || !refundReason.value.trim()) return
+  refundSubmitting.value = true
+  refundError.value = ''
+  try {
+    const result = await requestBetRefund(target.id, refundReason.value.trim())
+    refundTarget.value = null
+    // loadBets clears page messages, so the confirmation is set after each reload.
+    const confirmation = result.commandWarning || `Refund requested for member #${target.member_id}`
+    await loadBets()
+    successMessage.value = confirmation
+    window.setTimeout(async () => {
+      await loadBets()
+      successMessage.value = confirmation
+    }, REFUND_STATUS_REFRESH_MS)
+  } catch (error) {
+    refundError.value = apiErrorMessage(error, 'Unable to request refund')
+    if (refundError.value.includes('401')) emit('unauthenticated')
+  } finally {
+    refundSubmitting.value = false
+  }
+}
+
+// refundStatusClass colors the refund badge: waiting (gold), completed (green), refused (coral).
+const refundStatusClass = (status: BetRefundRequestStatus): string => {
+  if (status === 'done') return 'bg-emerald-400/15 text-emerald-300'
+  if (status === 'failed') return 'bg-coral/15 text-coral'
+  return 'bg-gold/15 text-gold'
 }
 
 watch([page, perPage], () => {
