@@ -1,574 +1,467 @@
 <template>
-  <section class="flex min-h-[calc(100vh-6.5rem)] w-full flex-col">
-    <header class="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
-      <div class="flex items-center gap-3">
-        <div class="admin-icon-tile h-10 w-10">
-          <Icon icon="mdi:cash-multiple" class="h-5 w-5" />
-        </div>
-        <div>
-          <h1 class="text-2xl font-black tracking-normal">Game Bet</h1>
-          <p class="text-sm text-slate-400">Held, released, and settled round-bet ledger entries</p>
-        </div>
-      </div>
+  <div class="grid gap-4">
+    <PageHeader :title="t('bets.title')" :description="t('bets.description')">
+      <template #actions>
+        <RefreshButton :loading="refreshingActiveTab" @click="refreshPage" />
+      </template>
+    </PageHeader>
 
-      <button class="admin-icon-button" title="Refresh" @click="refreshPage">
-        <Icon icon="mdi:refresh" class="h-5 w-5" :class="{ 'animate-spin': refreshingActiveTab }" />
-      </button>
-    </header>
+    <Tabs v-model="activeTab">
+      <TabsList class="h-auto flex-wrap justify-start">
+        <TabsTrigger v-for="tab in gameTabs" :key="tab.name" :value="tab.name" class="px-3 py-1.5">
+          <component :is="tab.icon" />
+          {{ t(tab.label) }}
+        </TabsTrigger>
+      </TabsList>
+    </Tabs>
 
-    <nav class="admin-panel mb-4 flex flex-wrap gap-2 p-2">
-      <button
-        v-for="tab in gameTabs"
-        :key="tab.name"
-        class="flex h-10 items-center gap-2 rounded-md border px-3 text-sm font-bold transition"
-        :class="activeTab === tab.name ? 'border-gold bg-gold text-ink-950' : 'border-white/10 bg-ink-800 text-slate-200 hover:bg-ink-700'"
-        @click="activeTab = tab.name"
-      >
-        <Icon :icon="tab.icon" class="h-5 w-5" />
-        {{ tab.label }}
-      </button>
-    </nav>
+    <ErrorAlert :message="errorMessage" />
 
-    <section v-if="activeTab === 'overview'" class="mb-4 grid gap-3 sm:grid-cols-3">
-      <div v-for="stat in stats" :key="stat.label" class="admin-panel p-4">
-        <div class="mb-2 flex items-center justify-between">
-          <span class="text-xs font-bold uppercase text-slate-400">{{ stat.label }}</span>
-          <Icon :icon="stat.icon" class="h-5 w-5 text-gold" />
-        </div>
-        <strong class="text-2xl font-black">{{ stat.value }}</strong>
-      </div>
-    </section>
+    <!-- Overview -->
+    <template v-if="activeTab === 'overview'">
+      <section class="grid gap-3 sm:grid-cols-3">
+        <StatCard v-for="stat in stats" :key="stat.label" :label="stat.label" :value="stat.value" :icon="stat.icon" />
+      </section>
 
-    <section v-if="activeTab === 'room-setup'" class="grid flex-1 gap-4 lg:grid-cols-[minmax(320px,420px)_1fr]">
-      <form class="admin-panel h-max p-4" @submit.prevent="editingRoomId ? saveRoom() : createRoom()">
-        <div class="mb-4 flex items-center justify-between gap-3 border-b border-white/10 pb-3">
-          <div>
-            <h2 class="font-black">{{ editingRoomId ? 'Edit Room' : 'Create Room' }}</h2>
-            <p class="text-sm text-slate-400">{{ editingRoomId ? 'New entry fee applies from the next round' : 'New entry fee with default payout configs' }}</p>
-          </div>
-          <Icon :icon="editingRoomId ? 'mdi:pencil' : 'mdi:door-open'" class="h-5 w-5 text-gold" />
-        </div>
+      <div class="grid gap-4 lg:grid-cols-2">
+        <DataPanel :title="t('bets.recentBets')" size="compact" :loading="loading" :empty="records.length === 0" :empty-title="t('bets.noBetsYet')" :empty-icon="WalletIcon">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{{ t('col.ticket') }}</TableHead>
+                <TableHead>{{ t('col.member') }}</TableHead>
+                <TableHead class="text-right">{{ t('col.amount') }}</TableHead>
+                <TableHead>{{ t('col.status') }}</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="record in records.slice(0, 8)" :key="record.id">
+                <TableCell class="font-mono text-xs text-primary">{{ record.round_ticket || record.hold_key }}</TableCell>
+                <TableCell class="font-medium">#{{ record.member_id }}</TableCell>
+                <TableCell class="text-right font-mono tabular-nums">{{ formatMoney(record.amount) }}</TableCell>
+                <TableCell><StatusBadge :view="betStatusView(record.status)" /></TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </DataPanel>
 
-        <div class="grid gap-3">
-          <label class="grid gap-1 text-sm font-bold text-slate-300">
-            Room Code
-            <input v-model.trim="roomForm.room_code" :disabled="Boolean(editingRoomId)" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2 disabled:opacity-60" placeholder="TL-011" />
-            <span v-if="editingRoomId" class="text-xs font-normal text-slate-500">Room code can't be changed</span>
-          </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-300">
-            Room Name
-            <input v-model.trim="roomForm.room_name" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="TienLen Room" />
-          </label>
-          <label class="grid gap-1 text-sm font-bold text-slate-300">
-            Entry Fee
-            <input v-model.number="roomForm.entry_fee" type="number" min="1" step="1" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="2000000" />
-          </label>
-          <template v-if="editingRoomId">
-            <label class="grid gap-1 text-sm font-bold text-slate-300">
-              Status
-              <select v-model.number="roomForm.status_id" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2">
-                <option :value="1">Active</option>
-                <option :value="2">Inactive</option>
-              </select>
-            </label>
-            <label class="grid gap-1 text-sm font-bold text-slate-300">
-              Order
-              <input v-model.number="roomForm.order" type="number" min="1" step="1" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" />
-            </label>
-          </template>
-          <label v-else class="grid gap-1 text-sm font-bold text-slate-300">
-            Turn Timeout
-            <div class="relative">
-              <Icon icon="mdi:timer-sand" class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-              <input v-model.number="roomForm.turn_timeout_seconds" type="number" min="3" max="300" step="1" class="h-10 w-full rounded-md border border-white/10 bg-ink-800 pl-10 pr-16 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" />
-              <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black uppercase text-slate-500">Sec</span>
-            </div>
-          </label>
-          <button class="mt-2 flex h-10 items-center justify-center gap-2 rounded-md bg-gold px-4 text-sm font-black text-ink-950 disabled:opacity-50" :disabled="creatingRoom || savingRoom">
-            <Icon :icon="creatingRoom || savingRoom ? 'mdi:loading' : (editingRoomId ? 'mdi:content-save' : 'mdi:plus')" class="h-5 w-5" :class="{ 'animate-spin': creatingRoom || savingRoom }" />
-            {{ editingRoomId ? 'Save Room' : 'Create Room' }}
-          </button>
-          <button v-if="editingRoomId" type="button" class="flex h-10 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-4 text-sm font-black text-slate-100 hover:bg-ink-700" @click="cancelRoomEdit">
-            Cancel
-          </button>
-        </div>
-      </form>
-
-      <div class="admin-panel overflow-hidden">
-        <div class="border-b border-white/10 px-4 py-3">
-          <h2 class="font-black">Configured Rooms</h2>
-        </div>
-        <div class="grid gap-2 p-3 sm:grid-cols-2 xl:grid-cols-3">
-          <div v-for="room in rooms" :key="room.id" class="rounded-md border bg-ink-800 p-3" :class="editingRoomId === room.id ? 'border-gold/60' : 'border-white/10'">
-            <div class="mb-1 flex items-center justify-between gap-3">
-              <strong>{{ room.code || `Room ${room.id}` }}</strong>
-              <span class="text-xs text-gold">{{ formatMoney(room.entry_fee) }}</span>
-            </div>
-            <div class="mb-3 flex items-center justify-between gap-2 text-xs text-slate-400">
-              <span class="truncate">{{ room.name }} · #{{ room.sort_order }}</span>
-              <span :class="room.status_id === 1 ? 'text-emerald-300' : 'text-slate-500'">{{ room.status_id === 1 ? 'Active' : 'Inactive' }}</span>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-              <button class="flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 transition hover:bg-ink-700" @click="startRoomEdit(room)">
-                <Icon icon="mdi:pencil" class="h-4 w-4 text-gold" />
-                Edit Room
-              </button>
-              <button class="flex h-9 items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 transition hover:bg-ink-700" @click="editRoomTurnTimeout(room.id)">
-                <Icon icon="mdi:timer-edit" class="h-4 w-4 text-gold" />
-                Turn Timeout
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="activeTab === 'turn-timeout'" class="grid flex-1 gap-4 lg:grid-cols-[minmax(320px,420px)_1fr]">
-      <div class="admin-panel h-max p-4">
-        <div class="mb-4 flex items-center justify-between gap-3 border-b border-white/10 pb-3">
-          <div>
-            <h2 class="font-black">Turn Timeout</h2>
-            <p class="text-sm text-slate-400">Future rounds use the saved room timer</p>
-          </div>
-          <Icon icon="mdi:timer-sand" class="h-5 w-5 text-gold" />
-        </div>
-
-        <div class="grid gap-3 text-sm text-slate-300">
-          <div class="rounded-md border border-white/10 bg-ink-800 p-3">
-            <span class="mb-1 block text-xs font-black uppercase text-slate-500">Allowed Range</span>
-            <strong class="text-xl font-black text-slate-100">3-300 seconds</strong>
-          </div>
-          <div class="rounded-md border border-white/10 bg-ink-800 p-3">
-            <span class="mb-1 block text-xs font-black uppercase text-slate-500">Configured Rooms</span>
-            <strong class="text-xl font-black text-slate-100">{{ roomConfigurations.length.toLocaleString() }}</strong>
-          </div>
-          <p class="text-xs leading-5 text-slate-500">Saved values apply when a new game starts. Already-running Redis turn timers are not rewritten by this operation.</p>
-        </div>
-      </div>
-
-      <div class="admin-panel min-h-0 overflow-hidden">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-          <div>
-            <h2 class="font-black">Room Timing</h2>
-            <p class="text-sm text-slate-400">Per-room operation control for player turn timeouts</p>
-          </div>
-          <button class="admin-icon-button" title="Refresh timing" @click="loadRoomConfigurations">
-            <Icon icon="mdi:refresh" class="h-5 w-5" :class="{ 'animate-spin': roomConfigurationLoading }" />
-          </button>
-        </div>
-
-        <div v-if="roomConfigurationLoading" class="grid h-80 place-items-center text-slate-400">
-          <Icon icon="mdi:loading" class="mb-2 h-7 w-7 animate-spin text-gold" />
-          Loading room timing
-        </div>
-        <div v-else-if="roomConfigurations.length === 0" class="grid h-80 place-items-center text-slate-400">
-          No room timing found
-        </div>
-        <div v-else class="overflow-auto">
-          <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
-            <thead class="sticky top-0 z-10 bg-ink-800 text-xs uppercase text-slate-400">
-              <tr>
-                <th class="px-4 py-3 font-black">Room</th>
-                <th class="px-4 py-3 font-black">Timeout</th>
-                <th class="px-4 py-3 font-black">Updated</th>
-                <th class="px-4 py-3 font-black">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="config in roomConfigurations" :key="config.id" class="border-t border-white/10 hover:bg-white/[0.03]" :class="{ 'bg-gold/10': selectedRoomConfigurationId === config.room_id }">
-                <td class="px-4 py-3">
-                  <span class="block font-black">{{ config.room_code || `Room ${config.room_id}` }}</span>
-                  <span class="text-xs text-slate-500">{{ config.room_name }}</span>
-                </td>
-                <td class="px-4 py-3">
-                  <div v-if="roomConfigurationEdits[config.room_id]" class="relative w-36">
-                    <input v-model.number="roomConfigurationEdits[config.room_id].turnTimeoutSeconds" type="number" min="3" max="300" step="1" class="h-9 w-full rounded-md border border-white/10 bg-ink-800 px-3 pr-12 text-sm text-gold outline-none ring-gold/40 focus:ring-2" />
-                    <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black uppercase text-slate-500">Sec</span>
-                  </div>
-                </td>
-                <td class="px-4 py-3 text-slate-300">{{ formatDate(config.updated_at || config.created_at) }}</td>
-                <td class="px-4 py-3">
-                  <button class="flex h-9 items-center gap-2 rounded-md border border-white/10 bg-ink-800 px-3 text-xs font-black text-slate-100 disabled:opacity-50" :disabled="savingRoomConfigurationId === config.room_id" @click="saveRoomConfiguration(config)">
-                    <Icon :icon="savingRoomConfigurationId === config.room_id ? 'mdi:loading' : 'mdi:content-save'" class="h-4 w-4" :class="{ 'animate-spin': savingRoomConfigurationId === config.room_id }" />
-                    Save
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-
-    <section v-if="activeTab === 'payout-config'" class="admin-panel min-h-0 flex-1 overflow-hidden">
-      <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-        <div>
-          <h2 class="font-black">Payout Config Percent</h2>
-          <p class="text-sm text-slate-400">Room-based rake and rank distribution tied to each room entry fee</p>
-        </div>
-        <Icon icon="mdi:percent" class="h-5 w-5 text-gold" />
-      </div>
-      <div class="overflow-auto">
-        <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
-          <thead class="bg-ink-800 text-xs uppercase text-slate-400">
-            <tr>
-              <th class="px-4 py-3 font-black">Players</th>
-              <th class="px-4 py-3 font-black">Room</th>
-              <th class="px-4 py-3 font-black">Entry Fee</th>
-              <th class="px-4 py-3 font-black">Rake</th>
-              <th class="px-4 py-3 font-black">Rank 1</th>
-              <th class="px-4 py-3 font-black">Rank 2</th>
-              <th class="px-4 py-3 font-black">Rank 3</th>
-              <th class="px-4 py-3 font-black">Rank 4</th>
-              <th class="px-4 py-3 font-black">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            <template v-for="config in payoutConfigRows" :key="config.key">
-              <tr v-if="payoutEdits[config.key]" class="border-t border-white/10 hover:bg-white/[0.03]">
-                <td class="px-4 py-3 font-black">{{ config.playerCount }}</td>
-                <td class="px-4 py-3">
-                  <span class="block font-black">{{ config.roomCode || `Room ${config.roomId}` }}</span>
-                  <span class="text-xs text-slate-500">{{ config.roomName }}</span>
-                </td>
-                <td class="px-4 py-3">{{ formatMoney(config.entryFee) }}</td>
-                <td class="px-4 py-3">
-                  <input v-model.number="payoutEdits[config.key].rakePercent" type="number" min="0" max="99" step="0.01" class="h-9 w-20 rounded-md border border-white/10 bg-ink-800 px-2 text-sm text-gold outline-none ring-gold/40 focus:ring-2" />
-                </td>
-                <td class="px-4 py-3">
-                  <input v-model.number="payoutEdits[config.key].rankPercents[1]" type="number" min="0" max="100" step="0.01" class="h-9 w-20 rounded-md border border-white/10 bg-ink-800 px-2 text-sm outline-none ring-gold/40 focus:ring-2" />
-                </td>
-                <td class="px-4 py-3">
-                  <input v-model.number="payoutEdits[config.key].rankPercents[2]" type="number" min="0" max="100" step="0.01" class="h-9 w-20 rounded-md border border-white/10 bg-ink-800 px-2 text-sm outline-none ring-gold/40 focus:ring-2" />
-                </td>
-                <td class="px-4 py-3">
-                  <input v-if="config.playerCount >= 3" v-model.number="payoutEdits[config.key].rankPercents[3]" type="number" min="0" max="100" step="0.01" class="h-9 w-20 rounded-md border border-white/10 bg-ink-800 px-2 text-sm outline-none ring-gold/40 focus:ring-2" />
-                  <span v-else class="text-slate-600">-</span>
-                </td>
-                <td class="px-4 py-3">
-                  <input v-if="config.playerCount >= 4" v-model.number="payoutEdits[config.key].rankPercents[4]" type="number" min="0" max="100" step="0.01" class="h-9 w-20 rounded-md border border-white/10 bg-ink-800 px-2 text-sm outline-none ring-gold/40 focus:ring-2" />
-                  <span v-else class="text-slate-600">-</span>
-                </td>
-                <td class="px-4 py-3">
-                  <button class="flex h-9 items-center gap-2 rounded-md border border-white/10 bg-ink-800 px-3 text-xs font-black text-slate-100 disabled:opacity-50" :disabled="savingPayoutKey === config.key" @click="savePayoutConfig(config)">
-                    <Icon :icon="savingPayoutKey === config.key ? 'mdi:loading' : 'mdi:content-save'" class="h-4 w-4" :class="{ 'animate-spin': savingPayoutKey === config.key }" />
-                    Save
-                  </button>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section v-if="activeTab === 'special-payout'" class="grid flex-1 gap-4 xl:grid-cols-[minmax(420px,520px)_1fr]">
-      <div class="admin-panel min-h-0 overflow-hidden">
-        <div class="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-          <div>
-            <h2 class="font-black">Special Payout Rules</h2>
-            <p class="text-sm text-slate-400">Future settlement rules for cutting 2 cards</p>
-          </div>
-          <Icon icon="mdi:cards-playing-spade-multiple" class="h-5 w-5 text-gold" />
-        </div>
-        <div class="max-h-[38rem] overflow-auto p-3">
-          <div v-if="specialRules.length === 0" class="grid h-44 place-items-center text-sm text-slate-400">
-            No special payout rules found
-          </div>
-          <div v-for="rule in specialRules" :key="rule.id" class="mb-3 rounded-md border border-white/10 bg-ink-800 p-3">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <strong>{{ rule.room_code || `Room ${rule.room_id}` }}</strong>
-                <p class="text-xs text-slate-400">{{ ruleLabel(rule.event_type) }} · {{ formatMoney(rule.entry_fee) }}</p>
+        <SectionCard :title="t('bets.payoutRooms')">
+          <div class="grid gap-2 sm:grid-cols-2">
+            <div v-for="room in payoutRoomSummaries" :key="room.roomId" class="rounded-lg border bg-muted/50 p-3">
+              <div class="mb-1 flex items-center justify-between gap-3">
+                <strong class="font-medium">{{ room.roomCode || t('common.roomFallback', { id: room.roomId }) }}</strong>
+                <span class="text-xs text-primary tabular-nums">{{ formatMoney(room.entryFee) }}</span>
               </div>
-              <span class="rounded px-2 py-1 text-xs font-black" :class="rule.status_id === 1 ? 'bg-emerald-400/15 text-emerald-300' : 'bg-slate-500/15 text-slate-300'">
-                {{ rule.status_id === 1 ? 'Active' : 'Paused' }}
-              </span>
-            </div>
-
-            <div v-if="specialRuleEdits[rule.id]" class="grid gap-3 sm:grid-cols-2">
-              <label class="grid gap-1 text-xs font-bold text-slate-300">
-                Payout Type
-                <select v-model="specialRuleEdits[rule.id].payout_type" class="h-9 rounded-md border border-white/10 bg-ink-900 px-2 text-sm outline-none">
-                  <option value="entry_fee_multiplier">Entry fee multiplier</option>
-                  <option value="fixed_amount">Fixed amount</option>
-                </select>
-              </label>
-              <label class="grid gap-1 text-xs font-bold text-slate-300">
-                Value
-                <input v-model.number="specialRuleEdits[rule.id].payout_value" type="number" min="0.01" step="0.01" class="h-9 rounded-md border border-white/10 bg-ink-900 px-2 text-sm outline-none ring-gold/40 focus:ring-2" />
-              </label>
-              <label class="grid gap-1 text-xs font-bold text-slate-300">
-                Commission %
-                <input v-model.number="specialRuleEdits[rule.id].commissionPercentInput" type="number" min="0" max="99" step="0.01" class="h-9 rounded-md border border-white/10 bg-ink-900 px-2 text-sm outline-none ring-gold/40 focus:ring-2" />
-              </label>
-              <label class="grid gap-1 text-xs font-bold text-slate-300">
-                Status
-                <select v-model.number="specialRuleEdits[rule.id].status_id" class="h-9 rounded-md border border-white/10 bg-ink-900 px-2 text-sm outline-none">
-                  <option :value="1">Active</option>
-                  <option :value="2">Paused</option>
-                </select>
-              </label>
-            </div>
-
-            <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-              <p class="text-xs text-slate-500">
-                {{ partyLabel(rule.payer) }} pays {{ partyLabel(rule.receiver) }}
-              </p>
-              <button class="flex h-9 items-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 disabled:opacity-50" :disabled="savingSpecialRuleId === rule.id" @click="saveSpecialRule(rule)">
-                <Icon :icon="savingSpecialRuleId === rule.id ? 'mdi:loading' : 'mdi:content-save'" class="h-4 w-4" :class="{ 'animate-spin': savingSpecialRuleId === rule.id }" />
-                Save
-              </button>
+              <p class="mb-3 text-xs text-muted-foreground">{{ t('bets.payoutRows', { count: room.configCount }) }}</p>
+              <Button variant="outline" size="sm" class="w-full" :disabled="!roomById(room.roomId)" @click="editRoomById(room.roomId)">
+                <PencilIcon />
+                {{ t('bets.editRoom') }}
+              </Button>
             </div>
           </div>
-        </div>
+        </SectionCard>
       </div>
+    </template>
 
-      <div class="admin-panel min-h-0 overflow-hidden">
-        <div class="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
-          <div>
-            <h2 class="font-black">Special Payout Ledger</h2>
-            <p class="text-sm text-slate-400">Debits, commission, and net credits outside normal pot payout</p>
+    <!-- Room setup -->
+    <SectionCard v-if="activeTab === 'room-setup'" :title="t('bets.configuredRooms')" :description="t('bets.configuredRoomsDesc')">
+      <template #actions>
+        <Button @click="openCreateRoom">
+          <PlusIcon />
+          {{ t('bets.createRoom') }}
+        </Button>
+      </template>
+      <p v-if="rooms.length === 0" class="py-10 text-center text-sm text-muted-foreground">{{ t('bets.noRooms') }}</p>
+      <div v-else class="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        <div v-for="room in rooms" :key="room.id" class="rounded-lg border bg-muted/50 p-3">
+          <div class="mb-1 flex items-center justify-between gap-3">
+            <strong class="font-medium">{{ room.code || t('common.roomFallback', { id: room.id }) }}</strong>
+            <span class="text-xs text-primary tabular-nums">{{ formatMoney(room.entry_fee) }}</span>
           </div>
-          <select v-model.number="specialPerPage" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm outline-none">
-            <option :value="10">10 rows</option>
-            <option :value="20">20 rows</option>
-            <option :value="50">50 rows</option>
-          </select>
-        </div>
-        <div v-if="specialLoading" class="grid h-80 place-items-center text-slate-400">
-          <Icon icon="mdi:loading" class="mb-2 h-7 w-7 animate-spin text-gold" />
-          Loading special payouts
-        </div>
-        <div v-else-if="specialPayouts.length === 0" class="grid h-80 place-items-center text-slate-400">
-          No special payouts found
-        </div>
-        <div v-else class="overflow-auto">
-          <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
-            <thead class="sticky top-0 z-10 bg-ink-800 text-xs uppercase text-slate-400">
-              <tr>
-                <th class="px-4 py-3 font-black">Ticket</th>
-                <th class="px-4 py-3 font-black">Payer</th>
-                <th class="px-4 py-3 font-black">Receiver</th>
-                <th class="px-4 py-3 font-black">Gross</th>
-                <th class="px-4 py-3 font-black">Commission</th>
-                <th class="px-4 py-3 font-black">Net</th>
-                <th class="px-4 py-3 font-black">Settled</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="record in specialPayouts" :key="record.id" class="border-t border-white/10 hover:bg-white/[0.03]">
-                <td class="px-4 py-3">
-                  <span class="block font-mono text-xs text-gold">{{ record.round_ticket }}</span>
-                  <span class="block text-xs text-slate-400">{{ ruleLabel(record.event_type) }}</span>
-                  <span class="text-xs text-slate-500">P{{ record.parent_room_id }} / I{{ record.inner_room_id }} · R{{ record.round_number }}</span>
-                </td>
-                <td class="px-4 py-3 font-black">#{{ record.payer_member_id }}</td>
-                <td class="px-4 py-3 font-black">#{{ record.receiver_member_id }}</td>
-                <td class="px-4 py-3 text-coral">{{ formatMoney(record.gross_amount) }}</td>
-                <td class="px-4 py-3">{{ formatMoney(record.commission_amount) }}</td>
-                <td class="px-4 py-3 text-emerald-300">{{ formatMoney(record.net_amount) }}</td>
-                <td class="px-4 py-3 text-slate-300">{{ formatDate(record.settled_at || record.created_at) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <footer class="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-sm text-slate-400">
-          <span>Page {{ specialPage }} · {{ specialTotal }} total special payouts</span>
-          <div class="flex gap-2">
-            <button class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 font-bold text-slate-100 disabled:opacity-40" :disabled="specialPage <= 1" @click="specialPage--">Previous</button>
-            <button class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 font-bold text-slate-100 disabled:opacity-40" :disabled="specialPage >= specialTotalPages" @click="specialPage++">Next</button>
+          <div class="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span class="truncate">{{ room.name }} · #{{ room.sort_order }}</span>
+            <StatusBadge :view="activeStatusView(room.status_id === 1)" />
           </div>
-        </footer>
-      </div>
-    </section>
-
-    <section v-if="activeTab === 'bet-ledger'" class="admin-panel mb-4 flex flex-wrap items-center gap-3 p-3">
-      <div class="relative min-w-64 flex-1">
-        <Icon icon="mdi:magnify" class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-500" />
-        <input v-model.trim="search" class="h-10 w-full rounded-md border border-white/10 bg-ink-800 pl-10 pr-3 text-sm outline-none ring-gold/40 focus:ring-2" placeholder="Search ticket, hold key, member, status" />
-      </div>
-      <select v-model.number="perPage" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm outline-none">
-        <option :value="10">10 rows</option>
-        <option :value="20">20 rows</option>
-        <option :value="50">50 rows</option>
-      </select>
-    </section>
-
-    <section v-if="activeTab === 'bet-ledger'" class="admin-panel min-h-0 flex-1 overflow-hidden">
-      <div v-if="loading" class="grid h-80 place-items-center text-slate-400">
-        <Icon icon="mdi:loading" class="mb-2 h-7 w-7 animate-spin text-gold" />
-        Loading bets
-      </div>
-      <div v-else-if="filteredRecords.length === 0" class="grid h-80 place-items-center text-slate-400">
-        No game bets found
-      </div>
-      <div v-else class="overflow-auto">
-        <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
-          <thead class="sticky top-0 z-10 bg-ink-800 text-xs uppercase text-slate-400">
-            <tr>
-              <th class="px-4 py-3 font-black">Ticket</th>
-              <th class="px-4 py-3 font-black">Member</th>
-              <th class="px-4 py-3 font-black">Room</th>
-              <th class="px-4 py-3 font-black">Amount</th>
-              <th class="px-4 py-3 font-black">Payout</th>
-              <th class="px-4 py-3 font-black">Status</th>
-              <th class="px-4 py-3 font-black">Created</th>
-              <th class="px-4 py-3 font-black">Refund</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="record in filteredRecords" :key="record.id" class="border-t border-white/10 hover:bg-white/[0.03]">
-              <td class="px-4 py-3">
-                <span class="block font-mono text-xs text-gold">{{ record.round_ticket || record.hold_key }}</span>
-                <span class="text-xs text-slate-500">Round {{ record.round_number }}</span>
-              </td>
-              <td class="px-4 py-3 font-black">#{{ record.member_id }}</td>
-              <td class="px-4 py-3">P{{ record.parent_room_id }} / I{{ record.inner_room_id }}</td>
-              <td class="px-4 py-3">{{ formatMoney(record.amount) }}</td>
-              <td class="px-4 py-3">{{ formatMoney(record.payout_amount) }}</td>
-              <td class="px-4 py-3">
-                <span class="rounded px-2 py-1 text-xs font-black" :class="statusClass(record.status)">
-                  {{ statusLabel(record.status, record.result) }}
-                </span>
-              </td>
-              <td class="px-4 py-3 text-slate-300">{{ formatDate(record.created_at) }}</td>
-              <td class="px-4 py-3">
-                <!-- Refund is offered only for escrowed bets; the game server still refuses it while the round is live. -->
-                <span v-if="record.refund_request_status" class="mb-1 block w-max rounded px-2 py-1 text-xs font-black" :class="refundStatusClass(record.refund_request_status)" :title="record.refund_failure_reason || ''">
-                  Refund {{ record.refund_request_status }}
-                </span>
-                <span v-if="record.refund_request_status === 'failed' && record.refund_failure_reason" class="mb-1 block max-w-56 text-xs text-coral">{{ record.refund_failure_reason }}</span>
-                <button
-                  v-if="canRequestRefund(record)"
-                  class="flex h-8 items-center gap-1 rounded-md border border-coral/40 bg-coral/10 px-3 text-xs font-black text-coral transition hover:bg-coral/20"
-                  @click="openRefundDialog(record)"
-                >
-                  <Icon icon="mdi:cash-refund" class="h-4 w-4" />
-                  {{ record.refund_request_status === 'failed' ? 'Retry refund' : 'Refund' }}
-                </button>
-                <span v-else-if="!record.refund_request_status" class="text-xs text-slate-500">-</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <!-- Refund confirmation: a reason is required because this returns money outside the normal round flow. -->
-    <div v-if="refundTarget" class="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" @click.self="closeRefundDialog">
-      <form class="admin-panel w-full max-w-md p-5" @submit.prevent="submitRefund">
-        <div class="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 class="font-black">Refund bet</h2>
-            <p class="text-sm text-slate-400">
-              Member #{{ refundTarget.member_id }} · {{ formatMoney(refundTarget.amount) }} · P{{ refundTarget.parent_room_id }} / I{{ refundTarget.inner_room_id }} · Round {{ refundTarget.round_number }}
-            </p>
-          </div>
-          <Icon icon="mdi:cash-refund" class="h-6 w-6 text-coral" />
+          <p class="mb-3 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <TimerIcon class="size-3.5" />
+            {{ t('bets.roomTurnTimer', { seconds: room.turn_timeout_seconds }) }}
+          </p>
+          <Button variant="outline" size="sm" class="w-full" @click="startRoomEdit(room)">
+            <PencilIcon />
+            {{ t('bets.editRoom') }}
+          </Button>
         </div>
-        <p class="mb-3 rounded-md border border-gold/30 bg-gold/10 px-3 py-2 text-xs text-gold">
-          The game server refuses a refund while this bet's round is still playing. Suspend the room with "Force stop" first, or wait for the round to end.
-        </p>
-        <label class="mb-4 grid gap-1 text-sm font-bold text-slate-300">
-          Reason
-          <textarea v-model="refundReason" rows="3" maxlength="255" class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="Player was charged but the round never started" />
-        </label>
-        <p v-if="refundError" class="mb-3 rounded-md border border-coral/40 bg-coral/10 px-3 py-2 text-sm text-coral">{{ refundError }}</p>
-        <div class="flex justify-end gap-2">
-          <button type="button" class="h-10 rounded-md border border-white/10 bg-ink-900 px-4 text-sm font-black text-slate-100 hover:bg-ink-700" @click="closeRefundDialog">Cancel</button>
-          <button class="flex h-10 items-center gap-2 rounded-md bg-coral px-4 text-sm font-black text-ink-950 disabled:opacity-60" :disabled="refundSubmitting || !refundReason.trim()">
-            <Icon :icon="refundSubmitting ? 'mdi:loading' : 'mdi:cash-refund'" class="h-4 w-4" :class="{ 'animate-spin': refundSubmitting }" />
-            Confirm refund
-          </button>
+      </div>
+    </SectionCard>
+
+    <!-- Payout config -->
+    <DataPanel v-if="activeTab === 'payout-config'" :title="t('bets.payout.title')" :description="t('bets.payout.desc')" :empty="payoutConfigRows.length === 0" :empty-title="t('bets.payout.none')" :empty-icon="PercentIcon">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{{ t('col.players') }}</TableHead>
+            <TableHead>{{ t('col.room') }}</TableHead>
+            <TableHead class="text-right">{{ t('col.entryFee') }}</TableHead>
+            <TableHead>{{ t('col.rakePercent') }}</TableHead>
+            <TableHead>{{ t('col.rankPercent', { rank: 1 }) }}</TableHead>
+            <TableHead>{{ t('col.rankPercent', { rank: 2 }) }}</TableHead>
+            <TableHead>{{ t('col.rankPercent', { rank: 3 }) }}</TableHead>
+            <TableHead>{{ t('col.rankPercent', { rank: 4 }) }}</TableHead>
+            <TableHead class="text-right">{{ t('col.action') }}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <template v-for="config in payoutConfigRows" :key="config.key">
+            <TableRow v-if="payoutEdits[config.key]">
+              <TableCell class="font-medium">{{ config.playerCount }}</TableCell>
+              <TableCell>
+                <span class="block font-medium">{{ config.roomCode || t('common.roomFallback', { id: config.roomId }) }}</span>
+                <span class="text-xs text-muted-foreground">{{ config.roomName }}</span>
+              </TableCell>
+              <TableCell class="text-right tabular-nums">{{ formatMoney(config.entryFee) }}</TableCell>
+              <TableCell><Input v-model.number="payoutEdits[config.key].rakePercent" type="number" min="0" max="99" step="0.01" class="w-20" /></TableCell>
+              <TableCell><Input v-model.number="payoutEdits[config.key].rankPercents[1]" type="number" min="0" max="100" step="0.01" class="w-20" /></TableCell>
+              <TableCell><Input v-model.number="payoutEdits[config.key].rankPercents[2]" type="number" min="0" max="100" step="0.01" class="w-20" /></TableCell>
+              <TableCell>
+                <Input v-if="config.playerCount >= 3" v-model.number="payoutEdits[config.key].rankPercents[3]" type="number" min="0" max="100" step="0.01" class="w-20" />
+                <span v-else class="text-muted-foreground">-</span>
+              </TableCell>
+              <TableCell>
+                <Input v-if="config.playerCount >= 4" v-model.number="payoutEdits[config.key].rankPercents[4]" type="number" min="0" max="100" step="0.01" class="w-20" />
+                <span v-else class="text-muted-foreground">-</span>
+              </TableCell>
+              <TableCell class="text-right">
+                <Button variant="outline" size="sm" :disabled="savingPayoutKey === config.key" @click="savePayoutConfig(config)">
+                  <Loader2Icon v-if="savingPayoutKey === config.key" class="animate-spin" />
+                  <SaveIcon v-else />
+                  {{ t('common.save') }}
+                </Button>
+              </TableCell>
+            </TableRow>
+          </template>
+        </TableBody>
+      </Table>
+    </DataPanel>
+
+    <!-- Special payout -->
+    <div v-if="activeTab === 'special-payout'" class="grid gap-4 xl:grid-cols-[minmax(24rem,32rem)_minmax(0,1fr)]">
+      <SectionCard :title="t('bets.special.rulesTitle')" :description="t('bets.special.rulesDesc')" class="h-max">
+        <p v-if="specialRules.length === 0" class="py-10 text-center text-sm text-muted-foreground">{{ t('bets.special.noRules') }}</p>
+        <!-- One block per room: the balance players need to join (live while editing), then each cut rule. -->
+        <div v-else class="grid max-h-[44rem] gap-4 overflow-auto">
+          <section v-for="group in specialRuleGroups" :key="group.roomId" class="rounded-lg border bg-muted/30">
+            <div class="flex flex-wrap items-start justify-between gap-2 border-b px-3 py-2.5">
+              <div>
+                <strong class="font-medium">{{ group.roomCode || t('common.roomFallback', { id: group.roomId }) }}</strong>
+                <p class="text-xs text-muted-foreground">{{ t('bets.special.roomFee', { fee: formatRiel(group.entryFee) }) }}</p>
+              </div>
+              <div class="text-right">
+                <p class="text-sm font-semibold text-primary">{{ t('bets.special.minimumBalance', { amount: formatRiel(group.minimumBalance) }) }}</p>
+              </div>
+              <p class="w-full text-xs text-muted-foreground">{{ t('bets.special.minimumBalanceHint') }}</p>
+            </div>
+
+            <div class="grid gap-3 p-3">
+              <div v-for="rule in group.rules" :key="rule.id" class="rounded-lg border bg-muted/50 p-3">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                  <strong class="text-sm font-medium">{{ ruleLabel(rule.event_type) }}</strong>
+                  <StatusBadge :view="activeStatusView(rule.status_id === 1, true)" />
+                </div>
+
+                <div v-if="specialRuleEdits[rule.id]" class="grid gap-3 sm:grid-cols-2">
+                  <FormField :id="`rule-type-${rule.id}`" :label="t('bets.special.payoutType')">
+                    <NativeSelect :id="`rule-type-${rule.id}`" v-model="specialRuleEdits[rule.id].payout_type" class="w-full">
+                      <NativeSelectOption value="entry_fee_multiplier">{{ t('bets.special.entryFeeMultiplier') }}</NativeSelectOption>
+                      <NativeSelectOption value="fixed_amount">{{ t('bets.special.fixedAmount') }}</NativeSelectOption>
+                    </NativeSelect>
+                  </FormField>
+                  <FormField :id="`rule-value-${rule.id}`" :label="t('bets.special.value')">
+                    <Input :id="`rule-value-${rule.id}`" v-model.number="specialRuleEdits[rule.id].payout_value" type="number" min="0.01" step="0.01" />
+                  </FormField>
+                  <FormField :id="`rule-commission-${rule.id}`" :label="t('bets.special.commission')">
+                    <Input :id="`rule-commission-${rule.id}`" v-model.number="specialRuleEdits[rule.id].commissionPercentInput" type="number" min="0" max="99" step="0.01" />
+                  </FormField>
+                  <FormField :id="`rule-status-${rule.id}`" :label="t('bets.special.status')">
+                    <NativeSelect :id="`rule-status-${rule.id}`" v-model.number="specialRuleEdits[rule.id].status_id" class="w-full">
+                      <NativeSelectOption :value="1">{{ t('status.active') }}</NativeSelectOption>
+                      <NativeSelectOption :value="2">{{ t('status.paused') }}</NativeSelectOption>
+                    </NativeSelect>
+                  </FormField>
+                </div>
+
+                <!-- What one cut moves with the values in the form (unsaved edits included). -->
+                <p v-if="ruleInput(rule).active" class="mt-3 rounded-md bg-background/60 px-2.5 py-1.5 text-xs">
+                  {{
+                    t('bets.special.cutAmounts', {
+                      gross: formatRiel(cutAmounts(rule).gross),
+                      net: formatRiel(cutAmounts(rule).net),
+                      percent: Number(specialRuleEdits[rule.id]?.commissionPercentInput ?? 0),
+                    })
+                  }}
+                </p>
+                <p v-else class="mt-3 rounded-md bg-background/60 px-2.5 py-1.5 text-xs text-muted-foreground">{{ t('bets.special.pausedNoCharge') }}</p>
+
+                <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+                  <p class="text-xs text-muted-foreground">{{ t('bets.special.pays', { payer: partyLabel(rule.payer), receiver: partyLabel(rule.receiver) }) }}</p>
+                  <Button variant="outline" size="sm" :disabled="savingSpecialRuleId === rule.id" @click="saveSpecialRule(rule)">
+                    <Loader2Icon v-if="savingSpecialRuleId === rule.id" class="animate-spin" />
+                    <SaveIcon v-else />
+                    {{ t('common.save') }}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-      </form>
+      </SectionCard>
+
+      <DataPanel :title="t('bets.special.ledgerTitle')" :description="t('bets.special.ledgerDesc')" :loading="specialLoading" :empty="specialPayouts.length === 0" :empty-title="t('bets.special.none')" :empty-icon="SparklesIcon">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{{ t('col.ticket') }}</TableHead>
+              <TableHead>{{ t('col.payer') }}</TableHead>
+              <TableHead>{{ t('col.receiver') }}</TableHead>
+              <TableHead class="text-right">{{ t('col.gross') }}</TableHead>
+              <TableHead class="text-right">{{ t('col.commission') }}</TableHead>
+              <TableHead class="text-right">{{ t('col.net') }}</TableHead>
+              <TableHead>{{ t('col.settled') }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="record in specialPayouts" :key="record.id">
+              <TableCell>
+                <span class="block font-mono text-xs text-primary">{{ record.round_ticket }}</span>
+                <span class="block text-xs text-muted-foreground">{{ ruleLabel(record.event_type) }} · P{{ record.parent_room_id }} / I{{ record.inner_room_id }} · R{{ record.round_number }}</span>
+              </TableCell>
+              <TableCell class="font-medium">#{{ record.payer_member_id }}</TableCell>
+              <TableCell class="font-medium">#{{ record.receiver_member_id }}</TableCell>
+              <TableCell class="text-right tabular-nums text-destructive">{{ formatMoney(record.gross_amount) }}</TableCell>
+              <TableCell class="text-right tabular-nums">{{ formatMoney(record.commission_amount) }}</TableCell>
+              <TableCell class="text-right tabular-nums text-success">{{ formatMoney(record.net_amount) }}</TableCell>
+              <TableCell class="text-muted-foreground">{{ formatDate(record.settled_at || record.created_at) }}</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <template #footer>
+          <PaginationBar v-model:page="specialPage" v-model:per-page="specialPerPage" :total="specialTotal" :item-label="t('items.specialPayouts')" />
+        </template>
+      </DataPanel>
     </div>
 
-    <section v-if="activeTab === 'overview'" class="grid flex-1 gap-4 lg:grid-cols-2">
-      <div class="admin-panel overflow-hidden">
-        <div class="border-b border-white/10 px-4 py-3">
-          <h2 class="font-black">Recent Bets</h2>
+    <!-- Bet ledger -->
+    <DataPanel v-if="activeTab === 'bet-ledger'" :loading="loading" :empty="filteredRecords.length === 0" :empty-title="t('bets.ledger.none')" :empty-icon="WalletIcon" :empty-text="t('bets.ledger.noneText')">
+      <template #toolbar>
+        <div class="flex flex-wrap gap-1 rounded-lg bg-muted p-1">
+          <Button
+            v-for="filter in BET_STATUS_FILTERS"
+            :key="filter.value || 'all'"
+            size="sm"
+            :variant="betStatusGroup === filter.value ? 'secondary' : 'ghost'"
+            :class="betStatusGroup === filter.value ? 'bg-background shadow-sm' : 'text-muted-foreground'"
+            @click="betStatusGroup = filter.value"
+          >
+            {{ t(filter.label) }}
+          </Button>
         </div>
-        <div class="overflow-auto">
-          <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
-            <thead class="bg-ink-800 text-xs uppercase text-slate-400">
-              <tr>
-                <th class="px-4 py-3 font-black">Ticket</th>
-                <th class="px-4 py-3 font-black">Member</th>
-                <th class="px-4 py-3 font-black">Amount</th>
-                <th class="px-4 py-3 font-black">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="record in records.slice(0, 8)" :key="record.id" class="border-t border-white/10">
-                <td class="px-4 py-3 font-mono text-xs text-gold">{{ record.round_ticket || record.hold_key }}</td>
-                <td class="px-4 py-3 font-black">#{{ record.member_id }}</td>
-                <td class="px-4 py-3">{{ formatMoney(record.amount) }}</td>
-                <td class="px-4 py-3">{{ statusLabel(record.status, record.result) }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
+        <SearchInput v-model="search" :placeholder="t('bets.ledger.searchPlaceholder')" />
+      </template>
 
-      <div class="admin-panel overflow-hidden">
-        <div class="border-b border-white/10 px-4 py-3">
-          <h2 class="font-black">Payout Rooms</h2>
-        </div>
-        <div class="grid gap-2 p-3 sm:grid-cols-2">
-          <div v-for="room in payoutRoomSummaries" :key="room.roomId" class="rounded-md border border-white/10 bg-ink-800 p-3">
-            <div class="mb-2 flex items-center justify-between gap-3">
-              <strong>{{ room.roomCode || `Room ${room.roomId}` }}</strong>
-              <span class="text-xs text-gold">{{ formatMoney(room.entryFee) }}</span>
-            </div>
-            <p class="mb-3 text-xs text-slate-400">{{ room.configCount }} payout rows configured</p>
-            <button class="flex h-9 w-full items-center justify-center gap-2 rounded-md border border-white/10 bg-ink-900 px-3 text-xs font-black text-slate-100 transition hover:bg-ink-700" @click="editRoomTurnTimeout(room.roomId)">
-              <Icon icon="mdi:timer-edit" class="h-4 w-4 text-gold" />
-              Edit Turn Timeout
-            </button>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>{{ t('col.ticket') }}</TableHead>
+            <TableHead>{{ t('col.member') }}</TableHead>
+            <TableHead>{{ t('col.room') }}</TableHead>
+            <TableHead class="text-right">{{ t('col.amount') }}</TableHead>
+            <TableHead class="text-right">{{ t('col.payout') }}</TableHead>
+            <TableHead>{{ t('col.status') }}</TableHead>
+            <TableHead>{{ t('col.created') }}</TableHead>
+            <TableHead>{{ t('col.refund') }}</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow v-for="record in filteredRecords" :key="record.id">
+            <TableCell>
+              <span class="block font-mono text-xs text-primary">{{ record.round_ticket || record.hold_key }}</span>
+              <span class="text-xs text-muted-foreground">{{ t('bets.ledger.round', { round: record.round_number }) }}</span>
+            </TableCell>
+            <TableCell class="font-medium">#{{ record.member_id }}</TableCell>
+            <TableCell class="text-muted-foreground">P{{ record.parent_room_id }} / I{{ record.inner_room_id }}</TableCell>
+            <TableCell class="text-right font-mono tabular-nums">{{ formatMoney(record.amount) }}</TableCell>
+            <TableCell class="text-right font-mono tabular-nums">{{ formatMoney(record.payout_amount) }}</TableCell>
+            <TableCell>
+              <StatusBadge :view="betStatusView(record.status)" />
+              <span class="mt-1 block text-xs text-muted-foreground">{{ betResultLabel(record.result) || betReasonLabel(record.reason) }}</span>
+            </TableCell>
+            <TableCell class="text-muted-foreground">{{ formatDate(record.created_at) }}</TableCell>
+            <TableCell class="whitespace-normal">
+              <!-- Refund is offered only for escrowed bets; the game server still refuses it while the round is live. -->
+              <StatusBadge v-if="record.refund_request_status" class="mb-1" :view="refundStatusView(record.refund_request_status)" :title="record.refund_failure_reason || ''" />
+              <span v-if="record.refund_request_status === 'failed' && record.refund_failure_reason" class="mb-1 block max-w-56 text-xs text-destructive">{{ record.refund_failure_reason }}</span>
+              <Button v-if="canRequestRefund(record)" variant="outline" size="sm" class="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive" @click="openRefundDialog(record)">
+                <Undo2Icon />
+                {{ record.refund_request_status === 'failed' ? t('bets.ledger.retryRefund') : t('bets.ledger.refund') }}
+              </Button>
+              <span v-else-if="!record.refund_request_status" class="text-xs text-muted-foreground">-</span>
+            </TableCell>
+          </TableRow>
+        </TableBody>
+      </Table>
+
+      <template #footer>
+        <PaginationBar v-model:page="page" v-model:per-page="perPage" :total="total" :item-label="t('items.bets')" />
+      </template>
+    </DataPanel>
+
+    <!-- Create/edit room opens in a dialog so the room list can use the full width. -->
+    <Dialog v-model:open="roomDialogOpen">
+      <DialogContent class="bg-card sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ editingRoomId ? t('bets.roomDialog.editTitle') : t('bets.roomDialog.createTitle') }}</DialogTitle>
+          <DialogDescription>{{ editingRoomId ? t('bets.roomDialog.editDesc') : t('bets.roomDialog.createDesc') }}</DialogDescription>
+        </DialogHeader>
+
+        <form id="room-form" class="grid gap-4" @submit.prevent="editingRoomId ? saveRoom() : createRoom()">
+          <FormField id="room-code" :label="t('bets.roomDialog.code')" :hint="editingRoomId ? t('bets.roomDialog.codeLocked') : undefined">
+            <Input id="room-code" v-model.trim="roomForm.room_code" :disabled="Boolean(editingRoomId)" placeholder="TL-011" />
+          </FormField>
+          <FormField id="room-name" :label="t('bets.roomDialog.name')">
+            <Input id="room-name" v-model.trim="roomForm.room_name" placeholder="TienLen Room" />
+          </FormField>
+          <FormField id="room-fee" :label="t('bets.roomDialog.entryFee')">
+            <Input id="room-fee" v-model.number="roomForm.entry_fee" type="number" min="1" step="1" placeholder="2000000" />
+          </FormField>
+          <div v-if="editingRoomId" class="grid grid-cols-2 gap-4">
+            <FormField id="room-status" :label="t('bets.roomDialog.status')">
+              <NativeSelect id="room-status" v-model.number="roomForm.status_id" class="w-full">
+                <NativeSelectOption :value="1">{{ t('status.active') }}</NativeSelectOption>
+                <NativeSelectOption :value="2">{{ t('status.inactive') }}</NativeSelectOption>
+              </NativeSelect>
+            </FormField>
+            <FormField id="room-order" :label="t('bets.roomDialog.order')">
+              <Input id="room-order" v-model.number="roomForm.order" type="number" min="1" step="1" />
+            </FormField>
           </div>
-        </div>
-      </div>
-    </section>
+          <FormField id="room-timeout" :label="t('bets.roomDialog.timeout')" :hint="t('bets.roomDialog.timeoutHint')">
+            <Input id="room-timeout" v-model.number="roomForm.turn_timeout_seconds" type="number" min="3" max="300" step="1" />
+          </FormField>
 
-    <footer v-if="activeTab === 'bet-ledger'" class="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-400">
-      <span>Page {{ page }} · {{ total }} total bets</span>
-      <div class="flex gap-2">
-        <button class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 font-bold text-slate-100 disabled:opacity-40" :disabled="page <= 1" @click="page--">Previous</button>
-        <button class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 font-bold text-slate-100 disabled:opacity-40" :disabled="page >= totalPages" @click="page++">Next</button>
-      </div>
-    </footer>
-    <p v-if="errorMessage" class="mt-4 rounded-md border border-coral/40 bg-coral/10 px-3 py-2 text-sm text-coral">{{ errorMessage }}</p>
-    <p v-if="successMessage" class="mt-4 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-300">{{ successMessage }}</p>
-  </section>
+          <ErrorAlert :message="errorMessage" />
+        </form>
+
+        <DialogFooter>
+          <Button variant="outline" :disabled="creatingRoom || savingRoom" @click="roomDialogOpen = false">{{ t('common.cancel') }}</Button>
+          <Button type="submit" form="room-form" :disabled="creatingRoom || savingRoom">
+            <Loader2Icon v-if="creatingRoom || savingRoom" class="animate-spin" />
+            {{ editingRoomId ? t('bets.roomDialog.save') : t('bets.roomDialog.create') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Refund confirmation: a reason is required because this returns money outside the normal round flow. -->
+    <Dialog :open="Boolean(refundTarget)" @update:open="(open) => { if (!open) closeRefundDialog() }">
+      <DialogContent class="bg-card sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('bets.refund.title') }}</DialogTitle>
+          <DialogDescription v-if="refundTarget">
+            {{
+              t('bets.refund.target', {
+                member: refundTarget.member_id,
+                amount: formatMoney(refundTarget.amount),
+                parent: refundTarget.parent_room_id,
+                inner: refundTarget.inner_room_id,
+                round: refundTarget.round_number,
+              })
+            }}
+          </DialogDescription>
+        </DialogHeader>
+
+        <form id="refund-form" class="grid gap-4" @submit.prevent="submitRefund">
+          <Alert class="border-warning/30 bg-warning/10 text-warning">
+            <AlertDescription class="text-warning">
+              {{ t('bets.refund.warning') }}
+            </AlertDescription>
+          </Alert>
+          <FormField id="refund-reason" :label="t('bets.refund.reason')">
+            <Textarea id="refund-reason" v-model="refundReason" rows="3" maxlength="255" :placeholder="t('bets.refund.reasonPlaceholder')" />
+          </FormField>
+          <ErrorAlert :message="refundError" />
+        </form>
+
+        <DialogFooter>
+          <Button variant="outline" :disabled="refundSubmitting" @click="closeRefundDialog">{{ t('common.cancel') }}</Button>
+          <Button type="submit" form="refund-form" variant="destructive" :disabled="refundSubmitting || !refundReason.trim()">
+            <Loader2Icon v-if="refundSubmitting" class="animate-spin" />
+            <Undo2Icon v-else />
+            {{ t('bets.refund.confirm') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { Icon } from '@iconify/vue'
+import { computed, onMounted, reactive, ref, watch, type Component } from 'vue'
+import { toast } from 'vue-sonner'
+import {
+  CoinsIcon,
+  DoorOpenIcon,
+  LayoutDashboardIcon,
+  Loader2Icon,
+  PencilIcon,
+  PercentIcon,
+  PlusIcon,
+  SaveIcon,
+  SparklesIcon,
+  TimerIcon,
+  Undo2Icon,
+  WalletIcon,
+} from '@lucide/vue'
+import DataPanel from '@/components/admin/DataPanel.vue'
+import ErrorAlert from '@/components/admin/ErrorAlert.vue'
+import FormField from '@/components/admin/FormField.vue'
+import PageHeader from '@/components/admin/PageHeader.vue'
+import PaginationBar from '@/components/admin/PaginationBar.vue'
+import RefreshButton from '@/components/admin/RefreshButton.vue'
+import SearchInput from '@/components/admin/SearchInput.vue'
+import SectionCard from '@/components/admin/SectionCard.vue'
+import StatCard from '@/components/admin/StatCard.vue'
+import StatusBadge from '@/components/admin/StatusBadge.vue'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
+import { t, type MessageKey } from '@/i18n/adminLanguage'
+import { formatDate, formatMoney, formatNumber, formatRiel } from '@/lib/format'
+import { minimumBalanceForRound, specialPayoutAmounts, type SpecialPayoutAmounts, type SpecialRuleInput } from '@/lib/specialPayout'
+import { activeStatusView, betReasonLabel, betResultLabel, betStatusView, refundStatusView } from '@/lib/status'
 import {
   createRoomWithPayoutConfigs,
   listGamePayoutConfigs,
   listGameRoundBets,
   listGameSpecialPayoutRules,
   listGameSpecialPayouts,
-  listRoomConfigurations,
   listRooms,
   updateRoom,
-  updateRoomConfiguration,
   updateRoomPayoutConfigs,
   updateRoomSpecialPayoutRule,
   requestBetRefund,
   apiErrorMessage,
-  type BetRefundRequestStatus,
   type GamePayoutConfig,
+  type BetStatusGroup,
   type GameRoundBet,
   type GameSpecialPayout,
   type GameSpecialPayoutRule,
   type Room,
-  type RoomConfiguration,
 } from '../api/adminApi'
+import { useAdminLiveRefresh } from '../api/adminLive'
 
 const emit = defineEmits<{
   // Unauthorized loads are surfaced to the shell so it can clear auth and return to login.
@@ -577,22 +470,20 @@ const emit = defineEmits<{
 
 const loading = ref(false)
 const specialLoading = ref(false)
-const roomConfigurationLoading = ref(false)
 const creatingRoom = ref(false)
 const savingPayoutKey = ref('')
 const savingSpecialRuleId = ref(0)
-const savingRoomConfigurationId = ref(0)
 const errorMessage = ref('')
-const successMessage = ref('')
 const records = ref<GameRoundBet[]>([])
 const payoutConfigs = ref<GamePayoutConfig[]>([])
 const specialRules = ref<GameSpecialPayoutRule[]>([])
 const specialPayouts = ref<GameSpecialPayout[]>([])
-const roomConfigurations = ref<RoomConfiguration[]>([])
 const rooms = ref<Room[]>([])
 // editingRoomId switches the Room Setup form from "create" to "edit this room" (0 = creating).
 const editingRoomId = ref(0)
 const savingRoom = ref(false)
+// roomDialogOpen shows the create/edit room dialog; editingRoomId decides which of the two it is.
+const roomDialogOpen = ref(false)
 const page = ref(1)
 const perPage = ref(20)
 const total = ref(0)
@@ -600,24 +491,33 @@ const specialPage = ref(1)
 const specialPerPage = ref(20)
 const specialTotal = ref(0)
 const search = ref('')
+// betStatusGroup filters the ledger on the server ("refundable" = held or in a round), so it covers all pages.
+const betStatusGroup = ref<BetStatusGroup>('')
+// BET_STATUS_FILTERS are the ledger filter buttons, in the order admins usually need them.
+const BET_STATUS_FILTERS: Array<{ value: BetStatusGroup; label: MessageKey }> = [
+  { value: '', label: 'bets.filter.all' },
+  { value: 'refundable', label: 'bets.filter.refundable' },
+  { value: 'settled', label: 'bets.filter.settled' },
+  { value: 'released', label: 'bets.filter.released' },
+]
 const activeTab = ref<GameTabName>('overview')
-const selectedRoomConfigurationId = ref(0)
+// DEFAULT_TURN_TIMEOUT_SECONDS matches the API default (DefaultRoomTurnTimeoutSeconds) for new rooms.
+const DEFAULT_TURN_TIMEOUT_SECONDS = 10
 const roomForm = reactive({
   room_code: '',
   room_name: 'TienLen Room',
   entry_fee: 0,
   status_id: 1,
   order: 1,
-  turn_timeout_seconds: 10,
+  turn_timeout_seconds: DEFAULT_TURN_TIMEOUT_SECONDS,
 })
 const payoutEdits = ref<Record<string, PayoutEdit>>({})
 const specialRuleEdits = ref<Record<number, SpecialRuleEdit>>({})
-const roomConfigurationEdits = ref<Record<number, RoomConfigurationEdit>>({})
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
 const specialTotalPages = computed(() => Math.max(1, Math.ceil(specialTotal.value / specialPerPage.value)))
 
-type GameTabName = 'overview' | 'room-setup' | 'turn-timeout' | 'payout-config' | 'special-payout' | 'bet-ledger'
+type GameTabName = 'overview' | 'room-setup' | 'payout-config' | 'special-payout' | 'bet-ledger'
 
 interface PayoutConfigRow {
   key: string
@@ -646,19 +546,14 @@ interface SpecialRuleEdit {
   order: number
 }
 
-// RoomConfigurationEdit mirrors persisted room timing while giving admins a local editable draft.
-interface RoomConfigurationEdit {
-  turnTimeoutSeconds: number
-}
 
 // gameTabs defines the local game-area navigation as this page grows beyond one table.
-const gameTabs: Array<{ name: GameTabName; label: string; icon: string }> = [
-  { name: 'overview', label: 'Overview', icon: 'mdi:view-dashboard' },
-  { name: 'room-setup', label: 'Room Setup', icon: 'mdi:door-open' },
-  { name: 'turn-timeout', label: 'Turn Timeout', icon: 'mdi:timer-sand' },
-  { name: 'payout-config', label: 'Payout Config', icon: 'mdi:percent' },
-  { name: 'special-payout', label: 'Special Payout', icon: 'mdi:cards-playing-spade-multiple' },
-  { name: 'bet-ledger', label: 'Bet Ledger', icon: 'mdi:cash-multiple' },
+const gameTabs: Array<{ name: GameTabName; label: MessageKey; icon: Component }> = [
+  { name: 'overview', label: 'bets.tab.overview', icon: LayoutDashboardIcon },
+  { name: 'room-setup', label: 'bets.tab.roomSetup', icon: DoorOpenIcon },
+  { name: 'payout-config', label: 'bets.tab.payoutConfig', icon: PercentIcon },
+  { name: 'special-payout', label: 'bets.tab.specialPayout', icon: SparklesIcon },
+  { name: 'bet-ledger', label: 'bets.tab.betLedger', icon: WalletIcon },
 ]
 
 // payoutConfigRows groups DB rows into one display row per room and player count for the percent table.
@@ -687,14 +582,13 @@ const payoutConfigRows = computed(() => {
 })
 
 const stats = computed(() => [
-  { label: 'Total bets', value: total.value.toLocaleString(), icon: 'mdi:cash-multiple' },
-  { label: 'Visible amount', value: formatMoney(records.value.reduce((sum, record) => sum + record.amount, 0)), icon: 'mdi:bank-transfer-out' },
-  { label: 'Avg timeout', value: formatAverageTimeout(roomConfigurations.value), icon: 'mdi:timer-sand' },
+  { label: t('bets.totalBets'), value: formatNumber(total.value), icon: WalletIcon },
+  { label: t('bets.amountOnPage'), value: formatMoney(records.value.reduce((sum, record) => sum + record.amount, 0)), icon: CoinsIcon },
+  { label: t('bets.avgTimeout'), value: formatAverageTimeout(rooms.value), icon: TimerIcon },
 ])
 
 // refreshingActiveTab keeps the shell refresh indicator tied to the current operation area.
 const refreshingActiveTab = computed(() => {
-  if (activeTab.value === 'turn-timeout') return roomConfigurationLoading.value
   if (activeTab.value === 'special-payout') return specialLoading.value
   return loading.value
 })
@@ -735,6 +629,46 @@ const filteredRecords = computed(() => {
   })
 })
 
+// ruleInput reads a rule's money settings from its form (unsaved edits included), falling back to the saved
+// rule, so the cut amounts and the balance needed update while the admin types.
+const ruleInput = (rule: GameSpecialPayoutRule): SpecialRuleInput => {
+  const edit = specialRuleEdits.value[rule.id]
+  if (!edit) {
+    return {
+      event_type: rule.event_type,
+      payout_type: rule.payout_type,
+      payout_value: rule.payout_value,
+      commission: rule.commission_percent,
+      active: rule.status_id === 1,
+    }
+  }
+  return {
+    event_type: edit.event_type,
+    payout_type: edit.payout_type,
+    payout_value: Number(edit.payout_value),
+    commission: Number(edit.commissionPercentInput || 0) / 100,
+    active: edit.status_id === 1,
+  }
+}
+
+// cutAmounts is what one cut of this rule moves in its room (loser pays gross, winner gets net).
+const cutAmounts = (rule: GameSpecialPayoutRule): SpecialPayoutAmounts => specialPayoutAmounts(ruleInput(rule), rule.entry_fee)
+
+// specialRuleGroups puts each room's cut rules together with the balance its players need to join,
+// calculated the same way the game server does before a round starts (lib/specialPayout.ts).
+const specialRuleGroups = computed(() => {
+  const groups = new Map<number, { roomId: number; roomCode: string; entryFee: number; rules: GameSpecialPayoutRule[]; minimumBalance: number }>()
+  for (const rule of specialRules.value) {
+    const group = groups.get(rule.room_id) ?? { roomId: rule.room_id, roomCode: rule.room_code, entryFee: rule.entry_fee, rules: [], minimumBalance: 0 }
+    group.rules.push(rule)
+    groups.set(rule.room_id, group)
+  }
+  return [...groups.values()].map((group) => ({
+    ...group,
+    minimumBalance: minimumBalanceForRound(group.rules.map(ruleInput), group.entryFee),
+  }))
+})
+
 // syncPayoutEdits converts backend decimal shares into percent inputs whenever fresh config rows arrive.
 const syncPayoutEdits = (rows: PayoutConfigRow[]): void => {
   const next: Record<string, PayoutEdit> = {}
@@ -770,29 +704,21 @@ const syncSpecialRuleEdits = (rows: GameSpecialPayoutRule[]): void => {
   specialRuleEdits.value = next
 }
 
-// syncRoomConfigurationEdits gives each room config an isolated draft so failed saves do not overwrite the table.
-const syncRoomConfigurationEdits = (rows: RoomConfiguration[]): void => {
-  const next: Record<number, RoomConfigurationEdit> = {}
-  for (const config of rows) {
-    next[config.room_id] = {
-      turnTimeoutSeconds: config.turn_timeout_seconds,
-    }
-  }
-  roomConfigurationEdits.value = next
-}
 
 // loadBets refreshes the current bet ledger page while preserving pagination choices.
-const loadBets = async (): Promise<void> => {
-  errorMessage.value = ''
-  successMessage.value = ''
-  loading.value = true
+// silent is used by live updates: it keeps the table and any success/error message on screen.
+const loadBets = async (silent = false): Promise<void> => {
+  if (!silent) {
+    errorMessage.value = ''
+    loading.value = true
+  }
   try {
-    const result = await listGameRoundBets(page.value, perPage.value)
+    const result = await listGameRoundBets(page.value, perPage.value, betStatusGroup.value)
     records.value = result.records
     total.value = result.total
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to load game bets'
-    if (String(errorMessage.value).includes('401')) emit('unauthenticated')
+    errorMessage.value = apiErrorMessage(error, t('bets.error.loadBets'))
+    if (errorMessage.value.includes('401')) emit('unauthenticated')
   } finally {
     loading.value = false
   }
@@ -804,7 +730,7 @@ const loadPayoutConfigs = async (): Promise<void> => {
   try {
     payoutConfigs.value = await listGamePayoutConfigs()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to load payout config'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.loadPayout'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   }
 }
@@ -815,7 +741,7 @@ const loadSpecialPayoutRules = async (): Promise<void> => {
   try {
     specialRules.value = await listGameSpecialPayoutRules()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to load special payout rules'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.loadRules'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   }
 }
@@ -829,33 +755,20 @@ const loadSpecialPayouts = async (): Promise<void> => {
     specialPayouts.value = result.records
     specialTotal.value = result.total
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to load special payouts'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.loadSpecial'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   } finally {
     specialLoading.value = false
   }
 }
 
-// loadRoomConfigurations reads room-level timing settings used by future turn timers.
-const loadRoomConfigurations = async (): Promise<void> => {
-  errorMessage.value = ''
-  roomConfigurationLoading.value = true
-  try {
-    roomConfigurations.value = await listRoomConfigurations()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to load room timing'
-    if (String(errorMessage.value).includes('401')) emit('unauthenticated')
-  } finally {
-    roomConfigurationLoading.value = false
-  }
-}
 
 // loadRooms reads the parent rooms shown as Configured Rooms (name, fee, status, order).
 const loadRooms = async (): Promise<void> => {
   try {
     rooms.value = await listRooms()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to load rooms'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.loadRooms'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   }
 }
@@ -863,13 +776,30 @@ const loadRooms = async (): Promise<void> => {
 // startRoomEdit fills the Room Setup form with one room so it can be edited in place.
 const startRoomEdit = (room: Room): void => {
   errorMessage.value = ''
-  successMessage.value = ''
   editingRoomId.value = room.id
   roomForm.room_code = room.code
   roomForm.room_name = room.name
   roomForm.entry_fee = room.entry_fee
   roomForm.status_id = room.status_id
   roomForm.order = room.sort_order
+  roomForm.turn_timeout_seconds = room.turn_timeout_seconds
+  roomDialogOpen.value = true
+}
+
+// roomById finds a loaded room, used by the overview cards that only know the room id.
+const roomById = (roomId: number): Room | undefined => rooms.value.find((room) => room.id === roomId)
+
+// editRoomById opens the Edit room dialog from places that only have the room id.
+const editRoomById = (roomId: number): void => {
+  const room = roomById(roomId)
+  if (room) startRoomEdit(room)
+}
+
+// openCreateRoom opens the dialog with an empty "create room" form.
+const openCreateRoom = (): void => {
+  errorMessage.value = ''
+  cancelRoomEdit()
+  roomDialogOpen.value = true
 }
 
 // cancelRoomEdit returns the form to "create room" with its defaults.
@@ -880,23 +810,27 @@ const cancelRoomEdit = (): void => {
   roomForm.entry_fee = 0
   roomForm.status_id = 1
   roomForm.order = 1
+  roomForm.turn_timeout_seconds = DEFAULT_TURN_TIMEOUT_SECONDS
 }
 
-// saveRoom validates and saves the room being edited, then refreshes every list that shows room data
-// (payout configs and timing rows carry the room's code/name/fee too).
+// saveRoom validates and saves the room being edited, including its turn timeout (the API saves both in one
+// transaction), then refreshes every list that shows room data (payout configs carry the room's code/fee too).
 const saveRoom = async (): Promise<void> => {
   errorMessage.value = ''
-  successMessage.value = ''
   if (!roomForm.room_name.trim()) {
-    errorMessage.value = 'Room name is required'
+    errorMessage.value = t('bets.error.roomNameRequired')
     return
   }
   if (roomForm.entry_fee <= 0) {
-    errorMessage.value = 'Entry fee must be greater than zero'
+    errorMessage.value = t('bets.error.entryFeePositive')
     return
   }
   if (!Number.isInteger(roomForm.order) || roomForm.order <= 0) {
-    errorMessage.value = 'Order must be a whole number greater than zero'
+    errorMessage.value = t('bets.error.orderPositive')
+    return
+  }
+  if (!isValidTurnTimeout(roomForm.turn_timeout_seconds)) {
+    errorMessage.value = t('bets.error.timeoutRange')
     return
   }
 
@@ -907,44 +841,40 @@ const saveRoom = async (): Promise<void> => {
       entry_fee: roomForm.entry_fee,
       status_id: roomForm.status_id,
       order: roomForm.order,
+      turn_timeout_seconds: roomForm.turn_timeout_seconds,
     })
-    successMessage.value = `Room ${saved.code} updated`
+    toast.success(t('bets.toast.roomUpdated', { code: saved.code }))
+    roomDialogOpen.value = false
     cancelRoomEdit()
-    await Promise.all([loadRooms(), loadPayoutConfigs(), loadRoomConfigurations()])
+    await Promise.all([loadRooms(), loadPayoutConfigs()])
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to update room'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.updateRoom'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   } finally {
     savingRoom.value = false
   }
 }
 
-// editRoomTurnTimeout moves operators from room cards directly to the matching turn-timeout control.
-const editRoomTurnTimeout = (roomId: number): void => {
-  selectedRoomConfigurationId.value = roomId
-  activeTab.value = 'turn-timeout'
-}
 
 // createRoom creates a new entry-fee room and relies on the backend to seed the standard payout matrices.
 const createRoom = async (): Promise<void> => {
   errorMessage.value = ''
-  successMessage.value = ''
   if (!roomForm.room_code.trim()) {
-    errorMessage.value = 'Room code is required'
+    errorMessage.value = t('bets.error.roomCodeRequired')
     return
   }
   if (roomForm.entry_fee <= 0) {
-    errorMessage.value = 'Entry fee must be greater than zero'
+    errorMessage.value = t('bets.error.entryFeePositive')
     return
   }
   if (!isValidTurnTimeout(roomForm.turn_timeout_seconds)) {
-    errorMessage.value = 'Turn timeout must be between 3 and 300 seconds'
+    errorMessage.value = t('bets.error.timeoutRange')
     return
   }
 
   creatingRoom.value = true
   try {
-    const result = await createRoomWithPayoutConfigs({
+    await createRoomWithPayoutConfigs({
       room_code: roomForm.room_code.trim(),
       room_name: roomForm.room_name.trim() || 'TienLen Room',
       entry_fee: roomForm.entry_fee,
@@ -953,45 +883,17 @@ const createRoom = async (): Promise<void> => {
     })
     roomForm.room_code = ''
     roomForm.entry_fee = 0
-    successMessage.value = 'Room created with default payout configs'
-    await Promise.all([loadRooms(), loadPayoutConfigs(), loadRoomConfigurations()])
-    selectedRoomConfigurationId.value = result.room.id
-    activeTab.value = 'turn-timeout'
+    roomDialogOpen.value = false
+    toast.success(t('bets.toast.roomCreated'))
+    await Promise.all([loadRooms(), loadPayoutConfigs()])
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to create room'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.createRoom'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   } finally {
     creatingRoom.value = false
   }
 }
 
-// saveRoomConfiguration persists one room's turn timer while keeping running game state untouched.
-const saveRoomConfiguration = async (config: RoomConfiguration): Promise<void> => {
-  const edit = roomConfigurationEdits.value[config.room_id]
-  if (!edit) return
-
-  errorMessage.value = ''
-  successMessage.value = ''
-  const turnTimeoutSeconds = Number(edit.turnTimeoutSeconds)
-  if (!isValidTurnTimeout(turnTimeoutSeconds)) {
-    errorMessage.value = `${config.room_code || `Room ${config.room_id}`} timeout must be between 3 and 300 seconds`
-    return
-  }
-
-  savingRoomConfigurationId.value = config.room_id
-  try {
-    await updateRoomConfiguration(config.room_id, {
-      turn_timeout_seconds: turnTimeoutSeconds,
-    })
-    successMessage.value = 'Turn timeout saved'
-    await loadRoomConfigurations()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to save room timing'
-    if (String(errorMessage.value).includes('401')) emit('unauthenticated')
-  } finally {
-    savingRoomConfigurationId.value = 0
-  }
-}
 
 // savePayoutConfig persists one room/player-count row after verifying rank percentages still total 100%.
 const savePayoutConfig = async (row: PayoutConfigRow): Promise<void> => {
@@ -999,11 +901,10 @@ const savePayoutConfig = async (row: PayoutConfigRow): Promise<void> => {
   if (!edit) return
 
   errorMessage.value = ''
-  successMessage.value = ''
   const ranks = Array.from({ length: row.playerCount }, (_, index) => index + 1)
   const totalPercent = ranks.reduce((sum, rank) => sum + Number(edit.rankPercents[rank] || 0), 0)
   if (Math.abs(totalPercent - 100) > 0.01) {
-    errorMessage.value = `${row.roomCode || `Room ${row.roomId}`} / ${row.playerCount} players must total 100%`
+    errorMessage.value = t('bets.error.payoutTotal', { room: row.roomCode || t('common.roomFallback', { id: row.roomId }), players: row.playerCount })
     return
   }
 
@@ -1017,10 +918,10 @@ const savePayoutConfig = async (row: PayoutConfigRow): Promise<void> => {
         payout_percent: decimalFromPercent(edit.rankPercents[rank] || 0),
       })),
     })
-    successMessage.value = 'Payout config saved'
+    toast.success(t('bets.toast.payoutSaved'))
     await loadPayoutConfigs()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to save payout config'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.savePayout'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   } finally {
     savingPayoutKey.value = ''
@@ -1033,13 +934,12 @@ const saveSpecialRule = async (rule: GameSpecialPayoutRule): Promise<void> => {
   if (!edit) return
 
   errorMessage.value = ''
-  successMessage.value = ''
   if (Number(edit.payout_value) <= 0) {
-    errorMessage.value = 'Special payout value must be greater than zero'
+    errorMessage.value = t('bets.error.specialValuePositive')
     return
   }
   if (Number(edit.commissionPercentInput) < 0 || Number(edit.commissionPercentInput) >= 100) {
-    errorMessage.value = 'Special commission must be between 0% and less than 100%'
+    errorMessage.value = t('bets.error.specialCommissionRange')
     return
   }
 
@@ -1055,10 +955,10 @@ const saveSpecialRule = async (rule: GameSpecialPayoutRule): Promise<void> => {
       status_id: edit.status_id,
       order: edit.order,
     })
-    successMessage.value = 'Special payout rule saved'
+    toast.success(t('bets.toast.ruleSaved'))
     await loadSpecialPayoutRules()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : 'Unable to save special payout rule'
+    errorMessage.value = apiErrorMessage(error, t('bets.error.saveRule'))
     if (String(errorMessage.value).includes('401')) emit('unauthenticated')
   } finally {
     savingSpecialRuleId.value = 0
@@ -1072,11 +972,7 @@ const refreshPage = async (): Promise<void> => {
     return
   }
   if (activeTab.value === 'room-setup') {
-    await Promise.all([loadRooms(), loadPayoutConfigs(), loadRoomConfigurations()])
-    return
-  }
-  if (activeTab.value === 'turn-timeout') {
-    await loadRoomConfigurations()
+    await Promise.all([loadRooms(), loadPayoutConfigs()])
     return
   }
   if (activeTab.value === 'bet-ledger') {
@@ -1087,17 +983,10 @@ const refreshPage = async (): Promise<void> => {
     await Promise.all([loadSpecialPayoutRules(), loadSpecialPayouts()])
     return
   }
-  await Promise.all([loadBets(), loadPayoutConfigs(), loadRoomConfigurations(), loadSpecialPayoutRules(), loadSpecialPayouts()])
+  await Promise.all([loadBets(), loadRooms(), loadPayoutConfigs(), loadSpecialPayoutRules(), loadSpecialPayouts()])
 }
 
-// formatDate keeps ledger timestamps readable in the operator's browser locale.
-const formatDate = (value?: string): string => {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
 
-// formatMoney normalizes numeric bet values so finance columns stay aligned.
-const formatMoney = (value: number): string => value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 // percentInput keeps percentage fields readable while preserving two decimals when admins need finer control.
 const percentInput = (value = 0): number => Number((value * 100).toFixed(2))
@@ -1109,37 +998,25 @@ const decimalFromPercent = (value = 0): number => Number((Number(value || 0) / 1
 const isValidTurnTimeout = (value: number): boolean => Number.isInteger(Number(value)) && Number(value) >= 3 && Number(value) <= 300
 
 // formatAverageTimeout summarizes configured room timing without implying it controls already-running rounds.
-const formatAverageTimeout = (rows: RoomConfiguration[]): string => {
+const formatAverageTimeout = (rows: Room[]): string => {
   if (rows.length === 0) return '-'
   const average = rows.reduce((sum, row) => sum + row.turn_timeout_seconds, 0) / rows.length
-  return `${Math.round(average)} sec`
+  return t('bets.avgTimeoutValue', { seconds: Math.round(average) })
 }
 
-// statusLabel combines status and result because settled bets need both finance and outcome context.
-const statusLabel = (status: string, result: string): string => {
-  if (result) return `${status} / ${result}`
-  return status || '-'
-}
 
-// statusClass makes held, settled, released, and failed states easy to scan in the table.
-const statusClass = (status: string): string => {
-  if (status === 'settled') return 'bg-emerald-400/15 text-emerald-300'
-  if (status === 'released') return 'bg-slate-500/15 text-slate-300'
-  if (status === 'failed') return 'bg-coral/15 text-coral'
-  return 'bg-gold/15 text-gold'
-}
 
 // ruleLabel turns backend event keys into short admin labels without hiding the configured value.
 const ruleLabel = (eventType: string): string => {
-  if (eventType === 'beat_single_2') return 'Beat single 2'
-  if (eventType === 'beat_pair_2') return 'Beat pair of 2s'
+  if (eventType === 'beat_single_2') return t('bets.special.beatSingle2')
+  if (eventType === 'beat_pair_2') return t('bets.special.beatPair2')
   return eventType || '-'
 }
 
 // partyLabel keeps money movement roles readable in the special payout editor.
 const partyLabel = (value: string): string => {
-  if (value === 'beaten_player') return 'Beaten player'
-  if (value === 'beating_player') return 'Beating player'
+  if (value === 'beaten_player') return t('bets.special.beatenPlayer')
+  if (value === 'beating_player') return t('bets.special.beatingPlayer')
   return value || '-'
 }
 
@@ -1184,31 +1061,34 @@ const submitRefund = async (): Promise<void> => {
   try {
     const result = await requestBetRefund(target.id, refundReason.value.trim())
     refundTarget.value = null
-    // loadBets clears page messages, so the confirmation is set after each reload.
-    const confirmation = result.commandWarning || `Refund requested for member #${target.member_id}`
-    await loadBets()
-    successMessage.value = confirmation
-    window.setTimeout(async () => {
-      await loadBets()
-      successMessage.value = confirmation
-    }, REFUND_STATUS_REFRESH_MS)
+    // A command warning means the request is saved but the game server will process it late.
+    if (result.commandWarning) toast.warning(result.commandWarning)
+    else toast.success(t('bets.toast.refundRequested', { member: target.member_id }))
+    await loadBets(true)
+    window.setTimeout(() => void loadBets(true), REFUND_STATUS_REFRESH_MS)
   } catch (error) {
-    refundError.value = apiErrorMessage(error, 'Unable to request refund')
+    refundError.value = apiErrorMessage(error, t('bets.error.requestRefund'))
     if (refundError.value.includes('401')) emit('unauthenticated')
   } finally {
     refundSubmitting.value = false
   }
 }
 
-// refundStatusClass colors the refund badge: waiting (gold), completed (green), refused (coral).
-const refundStatusClass = (status: BetRefundRequestStatus): string => {
-  if (status === 'done') return 'bg-emerald-400/15 text-emerald-300'
-  if (status === 'failed') return 'bg-coral/15 text-coral'
-  return 'bg-gold/15 text-gold'
-}
+
+// Bets are held, settled, released, and refunded by the game server; the ledger and the overview's recent
+// bets reload quietly. Room setup tabs are left alone so a live event never disturbs a form being edited.
+useAdminLiveRefresh(['bets_changed'], () => {
+  if (activeTab.value === 'bet-ledger' || activeTab.value === 'overview') void loadBets(true)
+})
 
 watch([page, perPage], () => {
   void loadBets()
+})
+
+// Changing the filter starts again at page 1 so the admin never lands on a page past the filtered total.
+watch(betStatusGroup, () => {
+  if (page.value === 1) void loadBets()
+  else page.value = 1
 })
 
 watch([specialPage, specialPerPage], () => {
@@ -1217,13 +1097,11 @@ watch([specialPage, specialPerPage], () => {
 
 watch(payoutConfigRows, syncPayoutEdits, { immediate: true })
 watch(specialRules, syncSpecialRuleEdits, { immediate: true })
-watch(roomConfigurations, syncRoomConfigurationEdits, { immediate: true })
 
 onMounted(() => {
   void loadBets()
   void loadRooms()
   void loadPayoutConfigs()
-  void loadRoomConfigurations()
   void loadSpecialPayoutRules()
   void loadSpecialPayouts()
 })

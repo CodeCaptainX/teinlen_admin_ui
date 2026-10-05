@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getAdminLanguage } from '@/i18n/adminLanguage'
 
 const TOKEN_KEY = 'tien_len_admin_token'
 export const ADMIN_AUTH_EXPIRED_EVENT = 'admin-auth-expired'
@@ -67,8 +68,33 @@ export interface GameRecord {
   created_at: string
 }
 
+// GameRecordStatus mirrors tbl_game_round_summaries.status: playing -> finished, or aborted by an admin force stop.
+export type GameRecordStatus = 'playing' | 'finished' | 'aborted'
+
+// GameRecordSummary is one row of the Game Records list. It carries only the fields the list shows;
+// hands, table cards, and play history come from getGameRecord on the detail page.
+export interface GameRecordSummary {
+  id: number
+  game_round_id: number
+  game_id: number
+  ticket_no: string
+  parent_room_id: number
+  inner_room_id: number
+  room_code: string
+  round_number: number
+  status: GameRecordStatus
+  player_count: number
+  bet: number
+  result_reason: string
+  winner_player_id?: number
+  winner_username: string
+  snapshot_id?: number
+  started_at: string
+  ended_at?: string
+}
+
 export interface GameRecordList {
-  records: GameRecord[]
+  records: GameRecordSummary[]
   page: number
   perPage: number
   total: number
@@ -97,6 +123,20 @@ export interface GameRoundBet {
   refund_request_id?: number
   refund_request_status?: BetRefundRequestStatus
   refund_failure_reason?: string
+}
+
+// BetStatusGroup mirrors the admin API bet ledger filter: "refundable" is money still held for a round
+// (held or unsettled), the only state a refund can be requested for. Empty means all bets.
+export type BetStatusGroup = '' | 'refundable' | 'settled' | 'released'
+
+// DashboardSummary mirrors the admin API dashboard counters.
+export interface DashboardSummary {
+  playing_rounds: number
+  rounds_today: number
+  held_bets: number
+  held_amount: number
+  pending_refunds: number
+  active_suspensions: number
 }
 
 // BetRefundRequestStatus mirrors tbl_game_bet_refund_requests.status: the member API moves the money and
@@ -311,11 +351,13 @@ export interface CreateRoomRequest {
 }
 
 // UpdateRoomRequest edits a parent room. room_code is not editable (it identifies the room in history).
+// UpdateRoomRequest edits a room and its turn timeout together; the API saves both in one transaction.
 export interface UpdateRoomRequest {
   room_name: string
   entry_fee: number
   status_id: number
   order: number
+  turn_timeout_seconds: number
 }
 
 export interface RankPayoutRequest {
@@ -327,10 +369,6 @@ export interface UpdateRoomPayoutConfigRequest {
   player_count: number
   rake_percent: number
   rank_payouts: RankPayoutRequest[]
-}
-
-export interface UpdateRoomConfigurationRequest {
-  turn_timeout_seconds: number
 }
 
 export interface UpdateRoomSpecialPayoutRuleRequest {
@@ -466,7 +504,7 @@ interface LoginResponse {
 }
 
 interface GameRecordListResponse {
-  data: GameRecord[]
+  data: GameRecordSummary[]
   page: number
   per_page: number
   total: number
@@ -474,6 +512,10 @@ interface GameRecordListResponse {
 
 interface GameRecordDetailResponse {
   data: GameRecord
+}
+
+interface DashboardSummaryResponse {
+  data: DashboardSummary
 }
 
 interface GameRoundBetListResponse {
@@ -485,10 +527,6 @@ interface GameRoundBetListResponse {
 
 interface GamePayoutConfigListResponse {
   data: GamePayoutConfig[]
-}
-
-interface RoomConfigurationListResponse {
-  data: RoomConfiguration[]
 }
 
 interface GameSpecialPayoutRuleListResponse {
@@ -522,10 +560,6 @@ interface RoomListResponse {
 
 interface UpdateRoomResponse {
   data: Room
-}
-
-interface UpdateRoomConfigurationResponse {
-  data: RoomConfiguration
 }
 
 interface UpdateRoomSpecialPayoutRuleResponse {
@@ -583,6 +617,9 @@ const client = axios.create({
 client.interceptors.request.use((config) => {
   const token = getStoredToken()
   if (token) config.headers.Authorization = `Bearer ${token}`
+  // The admin API (fiberi18n) translates its messages from Accept-Language, so send the UI's language and
+  // server messages match the screen. Accept-Language is CORS-safelisted, so no server CORS change is needed.
+  config.headers['Accept-Language'] = getAdminLanguage()
   return config
 })
 
@@ -613,11 +650,21 @@ function isAuthFailure(error: unknown): boolean {
 
 // apiErrorMessage returns the backend's own error text (for example "bet is already settled") when there is
 // one, so admins see why an action was refused instead of a generic "status code 400".
+// The API returns two texts: `message` is translated into the Accept-Language language, and `data.error` is
+// the raw technical reason, always in English. English keeps showing the specific technical reason as before;
+// other languages lead with the translated message and keep the technical reason in brackets for support.
 export function apiErrorMessage(error: unknown, fallback: string): string {
   if (axios.isAxiosError(error)) {
     const responseData = error.response?.data as { message?: string; data?: { error?: string } } | undefined
-    const detail = responseData?.data?.error || responseData?.message
-    if (detail) return detail
+    const message = responseData?.message
+    const detail = responseData?.data?.error
+    if (getAdminLanguage() === 'en') {
+      if (detail || message) return detail || message || fallback
+    } else if (message) {
+      return detail && detail !== message ? `${message} (${detail})` : message
+    } else if (detail) {
+      return `${fallback} (${detail})`
+    }
   }
   return error instanceof Error ? error.message : fallback
 }
@@ -630,7 +677,7 @@ export async function loginAdmin(username: string, password: string): Promise<Lo
   return { token: auth.token, tokenType: auth.token_type }
 }
 
-// listGameRecords fetches the admin-wide persisted game records page.
+// listGameRecords fetches one page of round summaries; open a row with getGameRecord for full detail.
 export async function listGameRecords(page: number, perPage: number): Promise<GameRecordList> {
   const response = await client.get<GameRecordListResponse>('/api/v1/tienlen/games', {
     params: {
@@ -654,11 +701,13 @@ export async function getGameRecord(gameRoundId: number): Promise<GameRecord> {
 }
 
 // listGameRoundBets fetches the admin bet ledger with the same pagination shape as game records.
-export async function listGameRoundBets(page: number, perPage: number): Promise<GameRoundBetList> {
+// statusGroup narrows the ledger on the server, so filters cover every page and not only the loaded one.
+export async function listGameRoundBets(page: number, perPage: number, statusGroup: BetStatusGroup = ''): Promise<GameRoundBetList> {
   const response = await client.get<GameRoundBetListResponse>('/api/v1/tienlen/bets', {
     params: {
       'paging_options[page]': page,
       'paging_options[per_page]': perPage,
+      ...(statusGroup ? { status: statusGroup } : {}),
     },
   })
 
@@ -668,6 +717,12 @@ export async function listGameRoundBets(page: number, perPage: number): Promise<
     perPage: response.data.per_page,
     total: response.data.total,
   }
+}
+
+// getDashboardSummary fetches the live dashboard counters (rounds playing, money held, pending refunds, ...).
+export async function getDashboardSummary(): Promise<DashboardSummary> {
+  const response = await client.get<DashboardSummaryResponse>('/api/v1/tienlen/dashboard')
+  return response.data.data
 }
 
 // listGamePayoutConfigs fetches active payout percent rows from the admin API.
@@ -688,17 +743,7 @@ export async function updateRoomPayoutConfigs(roomId: number, request: UpdateRoo
   return response.data.data
 }
 
-// listRoomConfigurations fetches parent-room timing settings for admin controls.
-export async function listRoomConfigurations(): Promise<RoomConfiguration[]> {
-  const response = await client.get<RoomConfigurationListResponse>('/api/v1/tienlen/room-configurations')
-  return response.data.data
-}
 
-// updateRoomConfiguration saves gameplay timing used by future game starts.
-export async function updateRoomConfiguration(roomId: number, request: UpdateRoomConfigurationRequest): Promise<RoomConfiguration> {
-  const response = await client.put<UpdateRoomConfigurationResponse>(`/api/v1/tienlen/rooms/${roomId}/configuration`, request)
-  return response.data.data
-}
 
 // listRooms fetches every parent room (name, entry fee, status, order, turn timeout) for room setup.
 export async function listRooms(): Promise<Room[]> {

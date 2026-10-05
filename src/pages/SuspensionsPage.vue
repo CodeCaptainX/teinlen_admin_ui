@@ -1,194 +1,190 @@
 <template>
-  <section class="flex min-h-[calc(100vh-6.5rem)] w-full flex-col">
-    <header class="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-4">
-      <div class="flex items-center gap-3">
-        <div class="admin-icon-tile h-10 w-10">
-          <Icon icon="mdi:tools" class="h-5 w-5" />
-        </div>
-        <div>
-          <h1 class="text-2xl font-black tracking-normal">Maintenance</h1>
-          <p class="text-sm text-slate-400">Suspend the website, all games, or one room, and resume when ready</p>
-        </div>
-      </div>
+  <div class="grid gap-4">
+    <PageHeader :title="t('maintenance.title')" :description="t('maintenance.description')">
+      <template #actions>
+        <RefreshButton :loading="loadingActive || loadingHistory" @click="refreshPage" />
+        <Button variant="destructive" @click="openSuspendDialog">
+          <CirclePauseIcon />
+          {{ t('maintenance.suspend') }}
+        </Button>
+      </template>
+    </PageHeader>
 
-      <button class="admin-icon-button" title="Refresh" @click="refreshPage">
-        <Icon icon="mdi:refresh" class="h-5 w-5" :class="{ 'animate-spin': loadingActive || loadingHistory }" />
-      </button>
-    </header>
+    <ErrorAlert :message="errorMessage" />
 
     <!-- Current status: one tile per level so admins see at a glance what players are blocked from. -->
-    <section class="mb-4 grid gap-3 sm:grid-cols-3">
-      <div v-for="tile in statusTiles" :key="tile.label" class="admin-panel p-4">
-        <div class="mb-2 flex items-center justify-between">
-          <span class="text-xs font-bold uppercase text-slate-400">{{ tile.label }}</span>
-          <span class="h-2.5 w-2.5 rounded-full" :class="tile.live ? 'bg-emerald-400' : 'bg-coral'" />
+    <section class="grid gap-3 sm:grid-cols-3">
+      <div v-for="tile in statusTiles" :key="tile.label" class="rounded-xl border bg-card p-4">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium uppercase tracking-wide text-muted-foreground">{{ tile.label }}</span>
+          <span class="size-2.5 rounded-full" :class="tile.live ? 'bg-success' : 'bg-destructive'" />
         </div>
-        <strong class="text-xl font-black" :class="tile.live ? 'text-emerald-300' : 'text-coral'">{{ tile.value }}</strong>
+        <p class="mt-2 text-xl font-semibold" :class="tile.live ? 'text-success' : 'text-destructive'">{{ tile.value }}</p>
       </div>
     </section>
 
-    <section class="grid flex-1 gap-4 lg:grid-cols-[minmax(320px,420px)_1fr]">
-      <form class="admin-panel h-max p-4" @submit.prevent="openConfirm">
-        <div class="mb-4 flex items-start justify-between gap-3">
-          <div>
-            <h2 class="font-black">Suspend</h2>
-            <p class="text-sm text-slate-400">Players see your message until you resume</p>
-          </div>
-          <Icon icon="mdi:pause-octagon" class="h-5 w-5 text-coral" />
-        </div>
-
-        <fieldset class="mb-4 grid gap-2">
-          <legend class="mb-1 text-sm font-bold text-slate-300">Level</legend>
-          <label v-for="scope in scopes" :key="scope.code" class="flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm" :class="form.scope === scope.code ? 'border-gold bg-gold/10' : 'border-white/10 bg-ink-800'">
-            <input v-model="form.scope" type="radio" :value="scope.code" class="accent-gold" />
-            <span class="font-bold">{{ scope.name }}</span>
-            <span class="ml-auto text-xs text-slate-500">{{ scopeHint(scope.code) }}</span>
-          </label>
-        </fieldset>
-
-        <label v-if="selectedScopeRequiresRoom" class="mb-4 grid gap-1 text-sm font-bold text-slate-300">
-          Room
-          <select v-model.number="form.roomId" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none">
-            <option :value="0" disabled>Select a room</option>
-            <option v-for="room in rooms" :key="room.id" :value="room.id">{{ room.code }} · {{ room.name }}</option>
-          </select>
-        </label>
-
-        <fieldset class="mb-4 grid gap-2">
-          <legend class="mb-1 text-sm font-bold text-slate-300">Rounds already playing</legend>
-          <label class="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm" :class="form.policy === 'drain' ? 'border-gold bg-gold/10' : 'border-white/10 bg-ink-800'">
-            <input v-model="form.policy" type="radio" value="drain" class="mt-1 accent-gold" />
-            <span>
-              <span class="block font-bold">Let them finish</span>
-              <span class="text-xs text-slate-400">Running rounds settle normally; no new round starts.</span>
-            </span>
-          </label>
-          <label class="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm" :class="form.policy === 'force_stop' ? 'border-coral bg-coral/10' : 'border-white/10 bg-ink-800'">
-            <input v-model="form.policy" type="radio" value="force_stop" class="mt-1 accent-coral" />
-            <span>
-              <span class="block font-bold">Force stop + refund all</span>
-              <span class="text-xs text-slate-400">Running rounds end now and every held bet is refunded.</span>
-            </span>
-          </label>
-        </fieldset>
-
-        <label class="mb-4 grid gap-1 text-sm font-bold text-slate-300">
-          Message to players
-          <input v-model="form.message" maxlength="255" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" placeholder="Upgrading server" />
-        </label>
-
-        <label class="mb-5 grid gap-1 text-sm font-bold text-slate-300">
-          Expected back (optional)
-          <input v-model="form.expectedBackAt" type="datetime-local" class="h-10 rounded-md border border-white/10 bg-ink-800 px-3 text-sm text-slate-100 outline-none ring-gold/40 focus:ring-2" />
-        </label>
-
-        <button class="flex h-10 w-full items-center justify-center gap-2 rounded-md bg-coral px-4 text-sm font-black text-ink-950 disabled:opacity-60" :disabled="submitting || !formIsValid">
-          <Icon icon="mdi:pause-octagon" class="h-5 w-5" />
-          Suspend
-        </button>
-      </form>
-
-      <div class="grid h-max gap-4">
-        <div class="admin-panel overflow-hidden">
-          <div class="border-b border-white/10 px-4 py-3">
-            <h2 class="font-black">Active now</h2>
-          </div>
-          <div v-if="activeRecords.length === 0" class="p-4 text-sm text-slate-400">Everything is live.</div>
-          <div v-else class="grid gap-2 p-3">
-            <div v-for="record in activeRecords" :key="record.id" class="flex flex-wrap items-center gap-3 rounded-md border border-coral/30 bg-coral/5 p-3">
-              <div class="min-w-48 flex-1">
-                <strong class="block">{{ suspensionTarget(record) }}</strong>
-                <span class="text-xs text-slate-400">
-                  {{ policyLabel(record.running_round_policy) }} · by {{ record.started_by_name || `#${record.started_by}` }} · {{ formatDate(record.started_at) }}
-                </span>
-                <span v-if="record.message" class="mt-1 block text-sm text-slate-200">“{{ record.message }}”</span>
-                <span v-if="record.expected_back_at" class="block text-xs text-gold">Expected back {{ formatDate(record.expected_back_at) }}</span>
-              </div>
-              <button class="flex h-9 items-center gap-2 rounded-md bg-emerald-400 px-3 text-xs font-black text-ink-950 disabled:opacity-60" :disabled="resumingId === record.id" @click="resume(record)">
-                <Icon :icon="resumingId === record.id ? 'mdi:loading' : 'mdi:play'" class="h-4 w-4" :class="{ 'animate-spin': resumingId === record.id }" />
-                Resume
-              </button>
+    <div class="grid gap-4 xl:grid-cols-2">
+      <SectionCard :title="t('maintenance.activeNow')" class="h-max">
+        <p v-if="activeRecords.length === 0" class="text-sm text-muted-foreground">{{ t('maintenance.everythingLive') }}</p>
+        <div v-else class="grid gap-2">
+          <div v-for="record in activeRecords" :key="record.id" class="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+            <div class="min-w-48 flex-1">
+              <strong class="block font-medium">{{ suspensionTarget(record) }}</strong>
+              <span class="text-xs text-muted-foreground">
+                {{ t('maintenance.byLine', { policy: policyLabel(record.running_round_policy), name: record.started_by_name || `#${record.started_by}`, date: formatDate(record.started_at) }) }}
+              </span>
+              <span v-if="record.message" class="mt-1 block text-sm">“{{ record.message }}”</span>
+              <span v-if="record.expected_back_at" class="block text-xs text-warning">{{ t('maintenance.expectedBack', { date: formatDate(record.expected_back_at) }) }}</span>
             </div>
+            <Button size="sm" class="bg-success text-primary-foreground hover:bg-success/90" :disabled="resumingId === record.id" @click="resumeTarget = record">
+              <Loader2Icon v-if="resumingId === record.id" class="animate-spin" />
+              <PlayIcon v-else />
+              {{ t('maintenance.resume') }}
+            </Button>
           </div>
         </div>
+      </SectionCard>
 
-        <div class="admin-panel overflow-hidden">
-          <div class="border-b border-white/10 px-4 py-3">
-            <h2 class="font-black">History</h2>
-          </div>
-          <div v-if="loadingHistory && history.length === 0" class="grid h-40 place-items-center text-slate-400">
-            <Icon icon="mdi:loading" class="h-6 w-6 animate-spin text-gold" />
-          </div>
-          <div v-else-if="history.length === 0" class="p-4 text-sm text-slate-400">No suspensions yet.</div>
-          <div v-else class="overflow-auto">
-            <table class="min-w-full border-separate border-spacing-0 text-left text-sm">
-              <thead class="bg-ink-800 text-xs uppercase text-slate-400">
-                <tr>
-                  <th class="px-4 py-3 font-black">Level</th>
-                  <th class="px-4 py-3 font-black">Running rounds</th>
-                  <th class="px-4 py-3 font-black">Message</th>
-                  <th class="px-4 py-3 font-black">Started</th>
-                  <th class="px-4 py-3 font-black">Ended</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="record in history" :key="record.id" class="border-t border-white/10">
-                  <td class="px-4 py-3 font-bold">{{ suspensionTarget(record) }}</td>
-                  <td class="px-4 py-3">{{ policyLabel(record.running_round_policy) }}</td>
-                  <td class="max-w-xs px-4 py-3 text-slate-300">{{ record.message || '-' }}</td>
-                  <td class="px-4 py-3 text-slate-300">
-                    {{ formatDate(record.started_at) }}
-                    <span class="block text-xs text-slate-500">{{ record.started_by_name || `#${record.started_by}` }}</span>
-                  </td>
-                  <td class="px-4 py-3 text-slate-300">
-                    <span v-if="record.status === 'active'" class="rounded bg-coral/15 px-2 py-1 text-xs font-black text-coral">Active</span>
-                    <template v-else>
-                      {{ formatDate(record.ended_at) }}
-                      <span class="block text-xs text-slate-500">{{ record.ended_by_name || `#${record.ended_by}` }}</span>
-                    </template>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <footer class="flex items-center justify-between gap-3 border-t border-white/10 px-4 py-3 text-sm text-slate-400">
-            <span>Page {{ historyPage }} · {{ historyTotal }} total</span>
-            <div class="flex gap-2">
-              <button class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 font-bold text-slate-100 disabled:opacity-40" :disabled="historyPage <= 1" @click="historyPage--">Previous</button>
-              <button class="rounded-md border border-white/10 bg-ink-800 px-3 py-2 font-bold text-slate-100 disabled:opacity-40" :disabled="historyPage >= historyTotalPages" @click="historyPage++">Next</button>
-            </div>
-          </footer>
-        </div>
-      </div>
-    </section>
-
-    <p v-if="errorMessage" class="mt-4 rounded-md border border-coral/40 bg-coral/10 px-3 py-2 text-sm text-coral">{{ errorMessage }}</p>
-    <p v-if="successMessage" class="mt-4 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-300">{{ successMessage }}</p>
-
-    <!-- Confirm step: suspending blocks real players (and force stop moves money), so it is never one click. -->
-    <div v-if="confirmOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" @click.self="confirmOpen = false">
-      <div class="admin-panel w-full max-w-md p-5">
-        <div class="mb-3 flex items-center gap-3">
-          <Icon icon="mdi:alert" class="h-6 w-6 text-coral" />
-          <h2 class="font-black">Confirm suspend</h2>
-        </div>
-        <p class="mb-2 text-sm text-slate-200">You are about to suspend <strong>{{ confirmTargetLabel }}</strong>.</p>
-        <p class="mb-4 text-sm" :class="form.policy === 'force_stop' ? 'text-coral' : 'text-slate-400'">{{ confirmPolicyText }}</p>
-        <div class="flex justify-end gap-2">
-          <button type="button" class="h-10 rounded-md border border-white/10 bg-ink-900 px-4 text-sm font-black text-slate-100 hover:bg-ink-700" @click="confirmOpen = false">Cancel</button>
-          <button class="flex h-10 items-center gap-2 rounded-md bg-coral px-4 text-sm font-black text-ink-950 disabled:opacity-60" :disabled="submitting" @click="submitSuspension">
-            <Icon :icon="submitting ? 'mdi:loading' : 'mdi:pause-octagon'" class="h-4 w-4" :class="{ 'animate-spin': submitting }" />
-            Confirm suspend
-          </button>
-        </div>
-      </div>
+      <DataPanel :title="t('maintenance.history')" size="compact" :loading="loadingHistory && history.length === 0" :empty="history.length === 0" :empty-title="t('maintenance.noSuspensions')" :empty-icon="WrenchIcon">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{{ t('col.level') }}</TableHead>
+              <TableHead>{{ t('col.runningRounds') }}</TableHead>
+              <TableHead>{{ t('col.message') }}</TableHead>
+              <TableHead>{{ t('col.started') }}</TableHead>
+              <TableHead>{{ t('col.ended') }}</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="record in history" :key="record.id">
+              <TableCell class="font-medium">{{ suspensionTarget(record) }}</TableCell>
+              <TableCell>{{ policyLabel(record.running_round_policy) }}</TableCell>
+              <TableCell class="max-w-xs whitespace-normal text-muted-foreground">{{ record.message || '-' }}</TableCell>
+              <TableCell class="text-muted-foreground">
+                {{ formatDate(record.started_at) }}
+                <span class="block text-xs">{{ record.started_by_name || `#${record.started_by}` }}</span>
+              </TableCell>
+              <TableCell class="text-muted-foreground">
+                <StatusBadge v-if="record.status === 'active'" :view="{ label: t('maintenance.activeBadge'), tone: 'danger' }" />
+                <template v-else>
+                  {{ formatDate(record.ended_at) }}
+                  <span class="block text-xs">{{ record.ended_by_name || `#${record.ended_by}` }}</span>
+                </template>
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <template #footer>
+          <PaginationBar v-model:page="historyPage" :total="historyTotal" :per-page="HISTORY_PER_PAGE" :item-label="t('items.suspensions')" hide-per-page />
+        </template>
+      </DataPanel>
     </div>
-  </section>
+
+    <!--
+      Suspend dialog, two steps: fill the form, then confirm. Suspending blocks real players (and force stop
+      moves money), so it is never one click.
+    -->
+    <Dialog v-model:open="suspendOpen">
+      <DialogContent class="bg-card sm:max-w-lg">
+        <template v-if="!confirmOpen">
+          <DialogHeader>
+            <DialogTitle>{{ t('maintenance.dialog.title') }}</DialogTitle>
+            <DialogDescription>{{ t('maintenance.dialog.desc') }}</DialogDescription>
+          </DialogHeader>
+
+          <form id="suspend-form" class="grid gap-4" @submit.prevent="openConfirm">
+            <fieldset class="grid gap-2">
+              <legend class="mb-1 text-xs font-medium text-muted-foreground">{{ t('maintenance.dialog.level') }}</legend>
+              <label v-for="scope in scopes" :key="scope.code" class="flex cursor-pointer items-center gap-3 rounded-md border px-3 py-2 text-sm" :class="form.scope === scope.code ? 'border-primary bg-primary/10' : 'bg-muted'">
+                <input v-model="form.scope" type="radio" :value="scope.code" class="accent-primary" />
+                <span class="font-medium">{{ scope.name }}</span>
+                <span class="ml-auto text-xs text-muted-foreground">{{ scopeHint(scope.code) }}</span>
+              </label>
+            </fieldset>
+
+            <FormField v-if="selectedScopeRequiresRoom" id="suspend-room" :label="t('maintenance.dialog.room')">
+              <NativeSelect id="suspend-room" v-model.number="form.roomId" class="w-full">
+                <NativeSelectOption :value="0" disabled>{{ t('maintenance.dialog.selectRoom') }}</NativeSelectOption>
+                <NativeSelectOption v-for="room in rooms" :key="room.id" :value="room.id">{{ room.code }} · {{ room.name }}</NativeSelectOption>
+              </NativeSelect>
+            </FormField>
+
+            <fieldset class="grid gap-2">
+              <legend class="mb-1 text-xs font-medium text-muted-foreground">{{ t('maintenance.dialog.runningRounds') }}</legend>
+              <label class="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm" :class="form.policy === 'drain' ? 'border-primary bg-primary/10' : 'bg-muted'">
+                <input v-model="form.policy" type="radio" value="drain" class="mt-1 accent-primary" />
+                <span>
+                  <span class="block font-medium">{{ t('maintenance.dialog.letFinish') }}</span>
+                  <span class="text-xs text-muted-foreground">{{ t('maintenance.dialog.letFinishDesc') }}</span>
+                </span>
+              </label>
+              <label class="flex cursor-pointer items-start gap-3 rounded-md border px-3 py-2 text-sm" :class="form.policy === 'force_stop' ? 'border-destructive bg-destructive/10' : 'bg-muted'">
+                <input v-model="form.policy" type="radio" value="force_stop" class="mt-1 accent-destructive" />
+                <span>
+                  <span class="block font-medium">{{ t('maintenance.dialog.forceStop') }}</span>
+                  <span class="text-xs text-muted-foreground">{{ t('maintenance.dialog.forceStopDesc') }}</span>
+                </span>
+              </label>
+            </fieldset>
+
+            <FormField id="suspend-message" :label="t('maintenance.dialog.message')">
+              <Input id="suspend-message" v-model="form.message" maxlength="255" :placeholder="t('maintenance.dialog.messagePlaceholder')" />
+            </FormField>
+            <FormField id="suspend-back" :label="t('maintenance.dialog.expectedBack')" :hint="t('maintenance.dialog.expectedBackHint')">
+              <Input id="suspend-back" v-model="form.expectedBackAt" type="datetime-local" />
+            </FormField>
+          </form>
+
+          <DialogFooter>
+            <Button variant="outline" @click="suspendOpen = false">{{ t('common.cancel') }}</Button>
+            <Button type="submit" form="suspend-form" variant="destructive" :disabled="!formIsValid">{{ t('common.continue') }}</Button>
+          </DialogFooter>
+        </template>
+
+        <template v-else>
+          <DialogHeader>
+            <DialogTitle class="flex items-center gap-2">
+              <TriangleAlertIcon class="size-5 text-destructive" />
+              {{ t('maintenance.confirm.title') }}
+            </DialogTitle>
+            <DialogDescription>{{ t('maintenance.confirm.lead', { target: confirmTargetLabel }) }}</DialogDescription>
+          </DialogHeader>
+          <p class="text-sm" :class="form.policy === 'force_stop' ? 'text-destructive' : 'text-muted-foreground'">{{ confirmPolicyText }}</p>
+          <DialogFooter>
+            <Button variant="outline" :disabled="submitting" @click="confirmOpen = false">{{ t('common.back') }}</Button>
+            <Button variant="destructive" :disabled="submitting" @click="submitSuspension">
+              <Loader2Icon v-if="submitting" class="animate-spin" />
+              {{ t('maintenance.confirm.submit') }}
+            </Button>
+          </DialogFooter>
+        </template>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Resume confirmation: resuming lets players back in, so it is confirmed like suspending. -->
+    <Dialog :open="Boolean(resumeTarget)" @update:open="(open) => { if (!open) resumeTarget = null }">
+      <DialogContent class="bg-card sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('maintenance.resumeDialog.title', { target: resumeTarget ? suspensionTarget(resumeTarget) : '' }) }}</DialogTitle>
+          <DialogDescription>{{ t('maintenance.resumeDialog.desc') }}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" @click="resumeTarget = null">{{ t('common.cancel') }}</Button>
+          <Button class="bg-success text-primary-foreground hover:bg-success/90" @click="resume">
+            <PlayIcon />
+            {{ t('maintenance.resume') }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { Icon } from '@iconify/vue'
+import { toast } from 'vue-sonner'
+import { CirclePauseIcon, Loader2Icon, PlayIcon, TriangleAlertIcon, WrenchIcon } from '@lucide/vue'
 import {
   apiErrorMessage,
   endSuspension,
@@ -201,7 +197,22 @@ import {
   type RunningRoundPolicy,
   type SuspensionScope,
   type SuspensionScopeOption,
-} from '../api/adminApi'
+} from '@/api/adminApi'
+import DataPanel from '@/components/admin/DataPanel.vue'
+import ErrorAlert from '@/components/admin/ErrorAlert.vue'
+import FormField from '@/components/admin/FormField.vue'
+import PageHeader from '@/components/admin/PageHeader.vue'
+import PaginationBar from '@/components/admin/PaginationBar.vue'
+import RefreshButton from '@/components/admin/RefreshButton.vue'
+import SectionCard from '@/components/admin/SectionCard.vue'
+import StatusBadge from '@/components/admin/StatusBadge.vue'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { t } from '@/i18n/adminLanguage'
+import { formatDate } from '@/lib/format'
 
 // SuspensionsPage lets admins put the member website, all games, or one room into maintenance and resume
 // it later. The admin API saves each action and the game server applies it within a second (or ~30s if
@@ -212,16 +223,19 @@ const emit = defineEmits<{
   unauthenticated: []
 }>()
 
-// HISTORY_PER_PAGE keeps the history table short next to the form.
+// HISTORY_PER_PAGE keeps the history table short next to the active list.
 const HISTORY_PER_PAGE = 10
 
 const loadingActive = ref(false)
 const loadingHistory = ref(false)
 const submitting = ref(false)
 const resumingId = ref(0)
+// suspendOpen shows the Suspend dialog; confirmOpen switches it from the form step to the confirm step.
+const suspendOpen = ref(false)
 const confirmOpen = ref(false)
+// resumeTarget is the suspension waiting for resume confirmation; null means the dialog is closed.
+const resumeTarget = ref<GameSuspension | null>(null)
 const errorMessage = ref('')
-const successMessage = ref('')
 const activeRecords = ref<GameSuspension[]>([])
 const scopes = ref<SuspensionScopeOption[]>([])
 const rooms = ref<Room[]>([])
@@ -238,11 +252,9 @@ const form = reactive({
   expectedBackAt: '',
 })
 
-const historyTotalPages = computed(() => Math.max(1, Math.ceil(historyTotal.value / HISTORY_PER_PAGE)))
-
 const selectedScopeRequiresRoom = computed(() => scopes.value.find((scope) => scope.code === form.scope)?.requires_room ?? false)
 
-// formIsValid mirrors the backend rules so the Suspend button is disabled instead of failing after submit.
+// formIsValid mirrors the backend rules so Continue is disabled instead of failing after submit.
 const formIsValid = computed(() => {
   if (selectedScopeRequiresRoom.value && form.roomId <= 0) return false
   if (form.expectedBackAt && new Date(form.expectedBackAt).getTime() <= Date.now()) return false
@@ -255,24 +267,28 @@ const statusTiles = computed(() => {
   const allGames = activeRecords.value.find((record) => record.scope === 'all_games')
   const roomCount = activeRecords.value.filter((record) => record.scope === 'room').length
   return [
-    { label: 'Website', value: site ? 'Maintenance' : 'Live', live: !site },
-    { label: 'All games', value: allGames ? 'Paused' : 'Live', live: !allGames },
-    { label: 'Rooms paused', value: roomCount === 0 ? 'None' : `${roomCount} room${roomCount === 1 ? '' : 's'}`, live: roomCount === 0 },
+    { label: t('maintenance.tile.website'), value: site ? t('maintenance.value.maintenance') : t('maintenance.value.live'), live: !site },
+    { label: t('maintenance.tile.allGames'), value: allGames ? t('maintenance.value.paused') : t('maintenance.value.live'), live: !allGames },
+    {
+      label: t('maintenance.tile.roomsPaused'),
+      value: roomCount === 0 ? t('maintenance.value.none') : t('maintenance.value.roomCount', { count: roomCount }),
+      live: roomCount === 0,
+    },
   ]
 })
 
 const confirmTargetLabel = computed(() => {
   if (form.scope === 'room') {
     const room = rooms.value.find((item) => item.id === form.roomId)
-    return room ? `room ${room.code}` : 'the selected room'
+    return room ? t('maintenance.confirm.targetRoom', { code: room.code }) : t('maintenance.confirm.targetSelectedRoom')
   }
-  return form.scope === 'site' ? 'the whole website' : 'all games'
+  return form.scope === 'site' ? t('maintenance.confirm.targetSite') : t('maintenance.confirm.targetAllGames')
 })
 
 const confirmPolicyText = computed(() =>
   form.policy === 'force_stop'
-    ? 'Rounds being played right now will stop immediately and every held bet will be refunded.'
-    : 'Rounds being played right now will finish and settle normally. No new round will start.',
+    ? t('maintenance.confirm.forceStop')
+    : t('maintenance.confirm.drain'),
 )
 
 // loadActive refreshes the current suspensions and the scope options.
@@ -283,7 +299,7 @@ const loadActive = async (): Promise<void> => {
     activeRecords.value = result.records
     scopes.value = result.scopes
   } catch (error) {
-    handleLoadError(error, 'Unable to load active suspensions')
+    handleLoadError(error, t('maintenance.error.loadActive'))
   } finally {
     loadingActive.value = false
   }
@@ -297,7 +313,7 @@ const loadHistory = async (): Promise<void> => {
     history.value = result.records
     historyTotal.value = result.total
   } catch (error) {
-    handleLoadError(error, 'Unable to load suspension history')
+    handleLoadError(error, t('maintenance.error.loadHistory'))
   } finally {
     loadingHistory.value = false
   }
@@ -308,12 +324,13 @@ const loadRooms = async (): Promise<void> => {
   try {
     rooms.value = await listRooms()
   } catch (error) {
-    handleLoadError(error, 'Unable to load rooms')
+    handleLoadError(error, t('maintenance.error.loadRooms'))
   }
 }
 
 // refreshPage reloads everything shown on the page.
 const refreshPage = async (): Promise<void> => {
+  errorMessage.value = ''
   await Promise.all([loadActive(), loadHistory(), loadRooms()])
 }
 
@@ -323,11 +340,16 @@ const handleLoadError = (error: unknown, fallback: string): void => {
   if (errorMessage.value.includes('401')) emit('unauthenticated')
 }
 
-// openConfirm shows the confirm dialog; nothing is sent until the admin confirms.
+// openSuspendDialog opens the Suspend dialog on its form step.
+const openSuspendDialog = (): void => {
+  errorMessage.value = ''
+  confirmOpen.value = false
+  suspendOpen.value = true
+}
+
+// openConfirm moves the dialog to the confirm step; nothing is sent until the admin confirms.
 const openConfirm = (): void => {
   if (!formIsValid.value) return
-  errorMessage.value = ''
-  successMessage.value = ''
   confirmOpen.value = true
 }
 
@@ -344,31 +366,38 @@ const submitSuspension = async (): Promise<void> => {
       // datetime-local has no timezone; toISOString sends the admin's local time as an absolute instant.
       expected_back_at: form.expectedBackAt ? new Date(form.expectedBackAt).toISOString() : undefined,
     })
+    suspendOpen.value = false
     confirmOpen.value = false
-    successMessage.value = result.commandWarning || `Suspended ${suspensionTarget(result.record)}`
+    // A command warning means the suspension is saved but the game server will pick it up late.
+    if (result.commandWarning) toast.warning(result.commandWarning)
+    else toast.success(t('maintenance.toast.suspended', { target: suspensionTarget(result.record) }))
     form.message = ''
     form.expectedBackAt = ''
     await Promise.all([loadActive(), loadHistory()])
   } catch (error) {
+    // Close the dialog so the page-level error explains why nothing was suspended.
+    suspendOpen.value = false
     confirmOpen.value = false
-    handleLoadError(error, 'Unable to suspend')
+    handleLoadError(error, t('maintenance.error.suspend'))
   } finally {
     submitting.value = false
   }
 }
 
-// resume ends one active suspension. The game server restarts countdowns in tables that have players.
-const resume = async (record: GameSuspension): Promise<void> => {
-  if (!window.confirm(`Resume ${suspensionTarget(record)}?`)) return
+// resume ends the confirmed suspension. The game server restarts countdowns in tables that have players.
+const resume = async (): Promise<void> => {
+  const record = resumeTarget.value
+  if (!record) return
+  resumeTarget.value = null
   resumingId.value = record.id
   errorMessage.value = ''
-  successMessage.value = ''
   try {
     const result = await endSuspension(record.id, '')
-    successMessage.value = result.commandWarning || `Resumed ${suspensionTarget(record)}`
+    if (result.commandWarning) toast.warning(result.commandWarning)
+    else toast.success(t('maintenance.toast.resumed', { target: suspensionTarget(record) }))
     await Promise.all([loadActive(), loadHistory()])
   } catch (error) {
-    handleLoadError(error, 'Unable to resume')
+    handleLoadError(error, t('maintenance.error.resume'))
   } finally {
     resumingId.value = 0
   }
@@ -376,25 +405,19 @@ const resume = async (record: GameSuspension): Promise<void> => {
 
 // suspensionTarget names what a suspension covers in plain words.
 const suspensionTarget = (record: GameSuspension): string => {
-  if (record.scope === 'room') return `Room ${record.room_code || `#${record.room_id}`}`
-  return record.scope === 'site' ? 'Whole website' : 'All games'
+  if (record.scope === 'room') return t('maintenance.target.room', { code: record.room_code || `#${record.room_id}` })
+  return record.scope === 'site' ? t('maintenance.target.site') : t('maintenance.target.allGames')
 }
 
 // scopeHint explains each level next to its radio button.
 const scopeHint = (scope: SuspensionScope): string => {
-  if (scope === 'site') return 'Maintenance page, no login'
-  if (scope === 'all_games') return 'Lobby open, no games'
-  return 'One room paused'
+  if (scope === 'site') return t('maintenance.hint.site')
+  if (scope === 'all_games') return t('maintenance.hint.allGames')
+  return t('maintenance.hint.room')
 }
 
 // policyLabel turns the stored policy into the wording used on the form.
-const policyLabel = (policy: RunningRoundPolicy): string => (policy === 'force_stop' ? 'Force stop + refund' : 'Let finish')
-
-// formatDate shows timestamps in the admin's local time.
-const formatDate = (value?: string): string => {
-  if (!value) return '-'
-  return new Date(value).toLocaleString()
-}
+const policyLabel = (policy: RunningRoundPolicy): string => (policy === 'force_stop' ? t('maintenance.policy.forceStop') : t('maintenance.policy.drain'))
 
 watch(historyPage, () => {
   void loadHistory()
