@@ -337,8 +337,8 @@ const km: Record<MessageKey, string> = {
   'bets.special.ledgerTitle': 'បញ្ជីទូទាត់ពិសេស',
   'bets.special.ledgerDesc': 'ការដក កម្រៃជើងសារ និងប្រាក់សុទ្ធ ក្រៅពីការទូទាត់ធម្មតា',
   'bets.special.none': 'រកមិនឃើញការទូទាត់ពិសេស',
-  'bets.special.beatSingle2': 'កាត់ 2 មួយសន្លឹក',
-  'bets.special.beatPair2': 'កាត់គូ 2',
+  'bets.special.beatSingle2': 'ការ៉េកាត់ 2 មួយសន្លឹក',
+  'bets.special.beatPair2': '4 គូជាប់កាត់គូ 2',
   'bets.special.beatenPlayer': 'អ្នកត្រូវគេកាត់',
   'bets.special.beatingPlayer': 'អ្នកកាត់',
 

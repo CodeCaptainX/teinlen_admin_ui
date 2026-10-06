@@ -355,8 +355,8 @@ const en = {
   'bets.special.ledgerTitle': 'Special payout ledger',
   'bets.special.ledgerDesc': 'Debits, commission, and net credits outside the normal pot payout',
   'bets.special.none': 'No special payouts found',
-  'bets.special.beatSingle2': 'Beat single 2',
-  'bets.special.beatPair2': 'Beat pair of 2s',
+  'bets.special.beatSingle2': 'Four of a kind cuts single 2',
+  'bets.special.beatPair2': 'Four pairs cut pair of 2s',
   'bets.special.beatenPlayer': 'Beaten player',
   'bets.special.beatingPlayer': 'Beating player',
 

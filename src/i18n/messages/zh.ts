@@ -337,8 +337,8 @@ const zh: Record<MessageKey, string> = {
   'bets.special.ledgerTitle': '特殊派彩账本',
   'bets.special.ledgerDesc': '正常奖池派彩以外的扣款、佣金和净入账',
   'bets.special.none': '未找到特殊派彩',
-  'bets.special.beatSingle2': '压单张 2',
-  'bets.special.beatPair2': '压对 2',
+  'bets.special.beatSingle2': '四条压单张 2',
+  'bets.special.beatPair2': '四连对压对 2',
   'bets.special.beatenPlayer': '被压玩家',
   'bets.special.beatingPlayer': '压牌玩家',
 
